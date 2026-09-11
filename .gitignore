@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.hypothesis/
+node_modules/
+dist/
+out/
+.ruff_cache/
+
+# Sample images are small and handy; the launch agent log is not ours to keep.
+*.log

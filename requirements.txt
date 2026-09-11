@@ -1,0 +1,21 @@
+# Geometry and service. Pinned to what this prototype was built and tested on.
+numpy==2.5.3
+scipy==1.18.1
+shapely==2.1.2
+trimesh==5.1.0
+manifold3d==3.5.3
+networkx==3.6.1
+lxml==6.1.3
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+
+# Reading a picture into the shape of a hole. scikit-image is here for two
+# functions: Otsu's threshold and marching squares.
+pillow==12.3.0
+scikit-image==0.26.0
+cairosvg==2.9.1
+
+# Tests
+pytest==9.1.1
+hypothesis==6.168.0
+httpx2==2.12.0

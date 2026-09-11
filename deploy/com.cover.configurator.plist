@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.cover.configurator</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/path/to/prosthetic-cover/.venv/bin/python</string>
+		<string>-m</string>
+		<string>uvicorn</string>
+		<string>backend.app:app</string>
+		<string>--host</string>
+		<string>0.0.0.0</string>
+		<string>--port</string>
+		<string>8000</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/tmp/cover-configurator.log</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/cover-configurator.log</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>WorkingDirectory</key>
+	<string>/path/to/prosthetic-cover</string>
+</dict>
+</plist>
