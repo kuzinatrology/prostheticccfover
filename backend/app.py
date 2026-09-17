@@ -12,6 +12,7 @@ so the parameter object is still the whole of what a cover is.
 from __future__ import annotations
 
 import json
+import io
 import logging
 import pathlib
 import time
@@ -22,6 +23,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Response
 from fastapi import Request as HttpRequest
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -31,6 +33,7 @@ from .motif import LIBRARY, MAX_BYTES, Motif, MotifError, held
 from .params import CoverParams, schema
 from .presets import as_json as presets_json
 from .printer_profile import DEFAULT_PROFILE, PROFILES
+from .accounts import authenticate, avatar, community_designs, create_user, delete_design, get_design, get_public_design, leaderboard, list_designs, my_rank, profile, rate_design, save_avatar, save_design, token, top_designers, top_designs, update_profile, user_from_token
 
 log = logging.getLogger("cover.api")
 
@@ -66,6 +69,34 @@ class MotifRequest(BaseModel):
     threshold_bias: float = 0.0
     motif_invert: bool = False
     motif_smoothing: float = 0.35
+
+
+class AccountRequest(BaseModel):
+    email: str
+    password: str
+    nickname: str = ""
+
+
+class DesignRequest(BaseModel):
+    name: str = "Untitled design"
+    params: dict[str, Any]
+
+
+class RatingRequest(BaseModel):
+    score: int
+
+
+class ProfileRequest(BaseModel):
+    avatar_url: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    city: str = ""
+    bio: str = ""
+    website: str = ""
+    social_link: str = ""
+
+
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 
 @lru_cache(maxsize=16)
@@ -123,6 +154,183 @@ def get_schema() -> dict[str, Any]:
     out["formats"] = list(FORMATS)
     out["presets"] = presets_json()
     return out
+
+
+def current_user(request: HttpRequest) -> dict[str, Any]:
+    user = user_from_token(request.cookies.get("cover_session"))
+    if not user:
+        raise HTTPException(401, "Sign in to use your account")
+    return user
+
+
+@app.get("/api/auth/me")
+def auth_me(request: HttpRequest) -> dict[str, Any]:
+    return {"user": user_from_token(request.cookies.get("cover_session"))}
+
+
+@app.post("/api/auth/register")
+def auth_register(req: AccountRequest, response: Response) -> dict[str, Any]:
+    try:
+        user = create_user(req.email, req.password, req.nickname)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    response.set_cookie("cover_session", token(int(user["id"])), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
+    return {"user": user}
+
+
+@app.post("/api/auth/login")
+def auth_login(req: AccountRequest, response: Response) -> dict[str, Any]:
+    user = authenticate(req.email, req.password)
+    if not user:
+        raise HTTPException(401, "Email or password is incorrect")
+    response.set_cookie("cover_session", token(int(user["id"])), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
+    return {"user": user}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(response: Response) -> dict[str, bool]:
+    response.delete_cookie("cover_session")
+    return {"ok": True}
+
+
+@app.get("/api/designs")
+def designs(request: HttpRequest) -> list[dict[str, Any]]:
+    return list_designs(int(current_user(request)["id"]))
+
+
+@app.post("/api/designs")
+def design_save(req: DesignRequest, request: HttpRequest) -> dict[str, Any]:
+    user = current_user(request)
+    params = CoverParams.from_dict(req.params).to_dict()
+    motif_id = str(params.get("motif_id", ""))
+    motif_data = LIBRARY.get(motif_id) if motif_id else None
+    return save_design(int(user["id"]), req.name, params, motif_id, motif_data)
+
+
+@app.get("/api/designs/{design_id}")
+def design_load(design_id: int, request: HttpRequest) -> dict[str, Any]:
+    record = get_design(int(current_user(request)["id"]), design_id)
+    if not record:
+        raise HTTPException(404, "Design not found")
+    design, motif_data = record
+    if motif_data and design["params"].get("motif_id"):
+        LIBRARY.add(motif_data)
+    return design
+
+
+@app.delete("/api/designs/{design_id}")
+def design_delete(design_id: int, request: HttpRequest) -> dict[str, bool]:
+    if not delete_design(int(current_user(request)["id"]), design_id):
+        raise HTTPException(404, "Design not found")
+    return {"ok": True}
+
+
+@app.get("/api/community/designs")
+def public_designs(request: HttpRequest, search: str = "") -> list[dict[str, Any]]:
+    user = user_from_token(request.cookies.get("cover_session"))
+    return community_designs(search, int(user["id"]) if user else None)
+
+
+@app.get("/api/community/designs/{design_id}")
+def public_design(design_id: int, request: HttpRequest) -> dict[str, Any]:
+    viewer = user_from_token(request.cookies.get("cover_session"))
+    record = get_public_design(design_id, int(viewer["id"]) if viewer else None)
+    if not record:
+        raise HTTPException(404, "Design not found")
+    design, motif_data = record
+    if motif_data and design["params"].get("motif_id"):
+        LIBRARY.add(motif_data)
+    return design
+
+
+@app.post("/api/community/designs/{design_id}/rating")
+def public_design_rate(design_id: int, req: RatingRequest, request: HttpRequest) -> dict[str, Any]:
+    user = current_user(request)
+    try:
+        return rate_design(int(user["id"]), design_id, req.score)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/community/participants")
+def public_participants() -> list[dict[str, Any]]:
+    return leaderboard()
+
+
+@app.get("/api/community/top-designers")
+@app.get("/community/top-designers")
+def public_top_designers(limit: int = 5) -> list[dict[str, Any]]:
+    return top_designers(limit)
+
+
+@app.get("/api/community/top-designs")
+@app.get("/community/top-designs")
+def public_top_designs(limit: int = 5) -> list[dict[str, Any]]:
+    return top_designs(limit)
+
+
+@app.get("/api/community/my-rank")
+@app.get("/community/my-rank")
+def public_my_rank(request: HttpRequest) -> dict[str, Any]:
+    try:
+        return my_rank(int(current_user(request)["id"]))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/profiles/{user_id}")
+def public_profile(user_id: int, request: HttpRequest) -> dict[str, Any]:
+    viewer = user_from_token(request.cookies.get("cover_session"))
+    try:
+        return profile(user_id, int(viewer["id"]) if viewer else None)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.put("/api/profile")
+def profile_update(req: ProfileRequest, request: HttpRequest) -> dict[str, Any]:
+    owner = current_user(request)
+    try:
+        return update_profile(int(owner["id"]), req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/profile/avatar")
+async def profile_avatar(request: HttpRequest) -> dict[str, Any]:
+    owner = current_user(request)
+    data = await request.body()
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+    if not data:
+        raise HTTPException(400, "Choose an image first")
+    if len(data) > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "Avatar must be 2 MB or smaller")
+    if not content_type.startswith("image/"):
+        raise HTTPException(415, "Avatar must be an image")
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as image:
+            image.verify()
+    except Exception as exc:
+        raise HTTPException(415, "That image could not be read") from exc
+    try:
+        return save_avatar(int(owner["id"]), data, content_type)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/profiles/{user_id}/avatar")
+def profile_avatar_image(user_id: int) -> Response:
+    stored = avatar(user_id)
+    if not stored:
+        raise HTTPException(404, "Avatar not found")
+    data, mime = stored
+    return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
 
 
 @app.post("/api/cover")
@@ -205,4 +413,12 @@ def post_download(req: Request, fmt: str = "3mf") -> Response:
 # Mounted last: the API routes above claim their paths first, and everything
 # else falls through to the built page. Absent until `npm run build` has run.
 if BUILT.is_dir():
+    @app.get("/workshop", include_in_schema=False)
+    def workshop_page() -> FileResponse:
+        return FileResponse(BUILT / "index.html")
+
+    @app.get("/profile/{user_id}", include_in_schema=False)
+    def profile_page(user_id: int) -> FileResponse:
+        return FileResponse(BUILT / "index.html")
+
     app.mount("/", StaticFiles(directory=BUILT, html=True), name="app")
