@@ -39,7 +39,8 @@ import {
   type Silhouette,
 } from "./api";
 import { Panel } from "./panel";
-import { has, strings } from "./strings.en";
+import { has } from "./strings.en";
+import { locale, setLocale, strings, subscribe, t } from "./i18n";
 import { Viewer } from "./viewer";
 
 const DEBOUNCE_MS = 250;
@@ -49,7 +50,7 @@ const masthead = document.getElementById("masthead") as HTMLElement;
 const panelRoot = document.getElementById("panel") as HTMLElement;
 const headerActions = document.createElement("nav");
 headerActions.className = "header-actions";
-headerActions.setAttribute("aria-label", "Account and community");
+headerActions.setAttribute("aria-label", t("accountCommunity"));
 masthead.prepend(headerActions);
 
 let schema: Schema;
@@ -76,6 +77,8 @@ let workshopBottomBar: HTMLElement;
 let profilePage: HTMLElement;
 let authButton: HTMLButtonElement;
 let profileNavButton: HTMLButtonElement;
+let languageButton: HTMLButtonElement;
+let activeWorkshopDesign: SavedDesign | null = null;
 
 /** The three controls that change how a held picture is read. */
 const READING = new Set(["threshold_bias", "motif_smoothing", "motif_invert"]);
@@ -120,7 +123,7 @@ function accountUi(): void {
   const button = document.createElement("button");
   button.className = "auth-button";
   button.type = "button";
-  button.textContent = "SIGN IN / REGISTER";
+  button.textContent = t("signInRegister");
   button.onclick = () => accountDialog.hidden = false;
   authButton = button;
   headerActions.append(button);
@@ -130,6 +133,9 @@ function accountUi(): void {
   accountDialog.hidden = true;
   accountDialog.innerHTML = `<div class="account-card"><button class="account-close" type="button" aria-label="Close">×</button><p class="group">Personal cabinet</p><h2 class="account-title">Your designs</h2><div class="account-content"></div></div>`;
   document.body.append(accountDialog);
+  (accountDialog.querySelector(".account-close") as HTMLElement).setAttribute("aria-label", t("close"));
+  (accountDialog.querySelector(".group") as HTMLElement).textContent = t("account");
+  (accountDialog.querySelector(".account-title") as HTMLElement).textContent = t("designs");
   accountDialog.querySelector(".account-close")!.addEventListener("click", () => accountDialog.hidden = true);
   designList = accountDialog.querySelector(".account-content") as HTMLElement;
 }
@@ -138,7 +144,7 @@ function communityUi(): void {
   const button = document.createElement("button");
   button.className = "community-button";
   button.type = "button";
-  button.textContent = "COMMUNITY";
+  button.textContent = t("navCommunity");
   button.addEventListener("click", () => { communityDialog.hidden = false; void renderCommunity(); });
   headerActions.append(button);
 
@@ -147,6 +153,11 @@ function communityUi(): void {
   communityDialog.hidden = true;
   communityDialog.innerHTML = `<div class="account-card community-card"><button class="account-close" type="button" aria-label="Close">×</button><p class="group">Community</p><h2 class="account-title">Public designs</h2><form class="community-search"><input name="search" placeholder="Find a design by name" /><button type="submit">SEARCH</button></form><div class="community-content"></div></div>`;
   document.body.append(communityDialog);
+  (communityDialog.querySelector(".account-close") as HTMLElement).setAttribute("aria-label", t("close"));
+  (communityDialog.querySelector(".group") as HTMLElement).textContent = t("community");
+  (communityDialog.querySelector(".account-title") as HTMLElement).textContent = t("publicDesigns");
+  (communityDialog.querySelector("[name=search]") as HTMLInputElement).placeholder = t("findDesign");
+  (communityDialog.querySelector(".community-search button") as HTMLElement).textContent = t("search");
   communityDialog.querySelector(".account-close")!.addEventListener("click", () => communityDialog.hidden = true);
   communityList = communityDialog.querySelector(".community-content") as HTMLElement;
   communityDialog.querySelector(".community-search")!.addEventListener("submit", (event) => { event.preventDefault(); void renderCommunity(new FormData(event.currentTarget as HTMLFormElement).get("search") as string); });
@@ -156,22 +167,40 @@ function navigationUi(): void {
   const workshop = document.createElement("button");
   workshop.className = "workshop-button";
   workshop.type = "button";
-  workshop.textContent = "WORKSHOP";
-  workshop.title = "Open the cover configurator";
+  workshop.textContent = t("navWorkshop");
+  workshop.title = t("openConfigurator");
   workshop.addEventListener("click", navigateWorkshop);
   headerActions.prepend(workshop);
 
   const profile = document.createElement("button");
   profile.className = "profile-button";
   profile.type = "button";
-  profile.textContent = "PROFILE";
-  profile.title = "Open your profile";
+  profile.textContent = t("navProfile");
+  profile.title = t("openProfile");
   profileNavButton = profile;
   profile.onclick = () => {
     if (user) navigateProfile(user.id);
     else accountDialog.hidden = false;
   };
   headerActions.append(profile);
+}
+
+function languageUi(): void {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "language-switch";
+  button.innerHTML = `<span data-locale="en">EN</span><span aria-hidden="true">/</span><span data-locale="ru">RU</span>`;
+  button.addEventListener("click", () => setLocale(locale === "en" ? "ru" : "en"));
+  languageButton = button;
+  headerActions.append(button);
+  updateLanguageButton();
+}
+
+function updateLanguageButton(): void {
+  if (!languageButton) return;
+  languageButton.title = t("switchLanguage");
+  languageButton.setAttribute("aria-label", t("switchLanguage"));
+  languageButton.querySelectorAll<HTMLElement>("[data-locale]").forEach((item) => item.classList.toggle("active", item.dataset.locale === locale));
 }
 
 function promptSignIn(): void {
@@ -195,11 +224,11 @@ function ratingWidget(design: SavedDesign, ownerId?: number): HTMLElement {
   const paintStars = (value: number) => buttons.forEach((button, index) => button.classList.toggle("rating-star-on", index < value));
   const updateSummary = () => {
     const current = design.rating;
-    summary.textContent = current?.count ? `${current.average.toFixed(1)} ★ / 5 · ${current.count} ratings` : "No ratings";
+    summary.textContent = current?.count ? `${current.average.toFixed(1)} ★ / 5 · ${current.count} ${t("ratings")}` : t("noRatings");
     paintStars(current?.mine ?? 0);
   };
   const restoreStars = () => paintStars(design.rating?.mine ?? 0);
-  const ratingTitle = isOwner ? "You cannot rate your own design" : "Rate this design";
+  const ratingTitle = isOwner ? t("cannotRateOwn") : t("rateThis");
   rating.title = ratingTitle;
   stars.title = ratingTitle;
   stars.addEventListener("mouseleave", restoreStars);
@@ -209,7 +238,7 @@ function ratingWidget(design: SavedDesign, ownerId?: number): HTMLElement {
     star.type = "button";
     star.className = "rating-star";
     star.textContent = "★";
-    star.title = isOwner ? ratingTitle : design.rating?.mine === score ? "Remove your rating" : `Rate ${score} out of 5`;
+    star.title = isOwner ? ratingTitle : design.rating?.mine === score ? t("removeRating") : t("rateN", { n: score });
     star.setAttribute("aria-label", star.title);
     star.disabled = isOwner;
     star.classList.toggle("rating-star-on", score <= (design.rating?.mine ?? 0));
@@ -218,7 +247,7 @@ function ratingWidget(design: SavedDesign, ownerId?: number): HTMLElement {
     star.addEventListener("click", async (event) => {
       event.stopPropagation();
       if (isOwner) return;
-      if (!user) { summary.textContent = "Sign in to rate"; promptSignIn(); return; }
+      if (!user) { summary.textContent = t("signInToRate"); promptSignIn(); return; }
       const nextScore = design.rating?.mine === score ? 0 : score;
       try {
         design.rating = await rateDesign(design.id, nextScore);
@@ -241,24 +270,24 @@ function renderWorkshopSave(): void {
   if (!user) return;
 
   const form = document.createElement("form"); form.className = "workshop-save-form";
-  const name = document.createElement("input"); name.name = "name"; name.value = "My cover"; name.maxLength = 100; name.placeholder = "Design name";
-  const button = document.createElement("button"); button.type = "submit"; button.textContent = "SAVE DESIGN";
+  const name = document.createElement("input"); name.name = "name"; name.value = "My cover"; name.maxLength = 100; name.placeholder = t("designName");
+  const button = document.createElement("button"); button.type = "submit"; button.textContent = t("saveDesign");
   const message = document.createElement("p"); message.className = "workshop-save-message";
   form.append(name, button, message);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     button.disabled = true;
-    message.textContent = "Saving…";
+    message.textContent = t("saving");
     try {
       await saveDesign(String(new FormData(form).get("name")), params);
       button.disabled = false;
-      message.textContent = "Saved ✓";
+      message.textContent = t("saved");
     } catch (error) {
       button.disabled = false;
       message.textContent = (error as Error).message;
     }
   });
-  const heading = document.createElement("p"); heading.className = "group"; heading.textContent = "Save current design";
+  const heading = document.createElement("p"); heading.className = "group"; heading.textContent = t("saveCurrent");
   workshopSaveArea.append(heading, form);
 }
 
@@ -268,7 +297,7 @@ function renderWorkshopRating(design: SavedDesign | null): void {
   const isOwnDesign = Boolean(design && user && design.user_id === user.id);
   workshopRatingArea.hidden = !design || isOwnDesign;
   if (!design || isOwnDesign) return;
-  const heading = document.createElement("p"); heading.className = "group"; heading.textContent = "Rate this design";
+  const heading = document.createElement("p"); heading.className = "group"; heading.textContent = t("rateThis");
   workshopRatingArea.append(heading, ratingWidget(design, design.user_id));
 }
 
@@ -288,7 +317,9 @@ function rankedDesignerRow(designer: RankedDesigner, position: number | null): H
   const nickname = document.createElement("strong"); nickname.textContent = designer.nickname;
   const details = document.createElement("span"); details.textContent = `${designer.designs} designs · ${designer.ratings} ratings`;
   identity.append(nickname, details);
-  const score = document.createElement("span"); score.className = "community-ranked-score"; score.textContent = `★ ${designer.average.toFixed(1)} / 5`;
+  details.textContent = `${designer.designs} ${t("designs")} · ${designer.ratings} ${t("ratings")}`;
+  const score = document.createElement("span"); score.className = "community-ranked-score";
+  score.textContent = `★ ${designer.average.toFixed(1)} / 5`;
   row.append(place, avatar, identity, score); return row;
 }
 
@@ -297,14 +328,15 @@ function rankedDesignCard(design: RankedDesign): HTMLElement {
   card.addEventListener("click", () => void openCommunityDesign(design.id));
   const name = document.createElement("strong"); name.className = "community-top-design-name"; name.textContent = design.name;
   const author = document.createElement("button"); author.type = "button"; author.className = "community-top-design-author";
-  author.append(miniAvatar(design), document.createTextNode(`by ${design.nickname}`));
+  author.replaceChildren(miniAvatar(design), document.createTextNode(`${t("by")} ${design.nickname}`));
   author.addEventListener("click", (event) => { event.stopPropagation(); navigateProfile(design.user_id); });
-  const rating = document.createElement("span"); rating.className = "community-top-design-rating"; rating.textContent = `★ ${design.average.toFixed(1)} / 5 · ${design.ratings} ratings`;
+  const rating = document.createElement("span"); rating.className = "community-top-design-rating";
+  rating.textContent = `★ ${design.average.toFixed(1)} / 5 · ${design.ratings} ${t("ratings")}`;
   card.append(name, author, rating); return card;
 }
 
 async function renderCommunity(search = ""): Promise<void> {
-  communityList.replaceChildren(document.createTextNode("Loading…"));
+  communityList.replaceChildren(document.createTextNode(t("loading")));
   try {
     const rankRequest = user ? myRank().catch(() => null) : Promise.resolve(null);
     const [designs, designers, topDesignList, rank] = await Promise.all([
@@ -315,9 +347,9 @@ async function renderCommunity(search = ""): Promise<void> {
     ]);
     communityList.replaceChildren();
 
-    const topSection = document.createElement("section"); topSection.className = "community-ranking-section"; topSection.append(sectionHeading("Top 5 Designers"));
+    const topSection = document.createElement("section"); topSection.className = "community-ranking-section"; topSection.append(sectionHeading(t("topDesigners")));
     if (!designers.length) {
-      topSection.append(Object.assign(document.createElement("p"), { className: "community-empty", textContent: "No rated designers yet." }));
+      topSection.append(Object.assign(document.createElement("p"), { className: "community-empty", textContent: t("noRatedDesigners") }));
     } else {
       const list = document.createElement("div"); list.className = "community-ranked-list";
       designers.forEach((designer, index) => list.append(rankedDesignerRow(designer, index + 1)));
@@ -334,13 +366,14 @@ async function renderCommunity(search = ""): Promise<void> {
       rankSection.append(rankedDesignerRow(rank.designer, rank.rank ?? 0));
       const note = document.createElement("p"); note.className = "community-rank-note";
       note.textContent = rank.designer.designs === 0 ? "No designs yet." : rank.rank === null ? "No ratings yet — rate designs to enter the ranking." : "";
+      note.textContent = rank.designer.designs === 0 ? t("noDesigns") : rank.rank === null ? t("noRatingsRank") : "";
       if (note.textContent) rankSection.append(note);
     }
     communityList.append(rankSection);
 
-    const designsSection = document.createElement("section"); designsSection.className = "community-ranking-section"; designsSection.append(sectionHeading("Top 5 Designs"));
+    const designsSection = document.createElement("section"); designsSection.className = "community-ranking-section"; designsSection.append(sectionHeading(t("topDesigns")));
     if (!topDesignList.length) {
-      designsSection.append(Object.assign(document.createElement("p"), { className: "community-empty", textContent: "No rated designs yet." }));
+      designsSection.append(Object.assign(document.createElement("p"), { className: "community-empty", textContent: t("noRatedDesigners") }));
     } else {
       const list = document.createElement("div"); list.className = "community-top-designs";
       topDesignList.forEach((design) => list.append(rankedDesignCard(design)));
@@ -348,8 +381,8 @@ async function renderCommunity(search = ""): Promise<void> {
     }
     communityList.append(designsSection);
 
-    const heading = document.createElement("p"); heading.className = "group community-design-heading"; heading.textContent = search ? `Designs matching “${search}”` : "All designs"; communityList.append(heading);
-    if (!designs.length) { const empty = document.createElement("p"); empty.className = "community-empty"; empty.textContent = "No designs found."; communityList.append(empty); }
+    const heading = document.createElement("p"); heading.className = "group community-design-heading"; heading.textContent = search ? `${t("allDesigns")}: "${search}"` : t("allDesigns"); communityList.append(heading);
+    if (!designs.length) { const empty = document.createElement("p"); empty.className = "community-empty"; empty.textContent = t("noDesignsFound"); communityList.append(empty); }
     for (const design of designs) communityList.append(communityDesignRow(design));
   } catch (error) { communityList.textContent = (error as Error).message; }
 }
@@ -359,7 +392,7 @@ function communityDesignRow(design: SavedDesign): HTMLElement {
   row.addEventListener("click", () => void openCommunityDesign(design.id));
   const title = document.createElement("button"); title.className = "community-design-title"; title.type = "button"; title.textContent = design.name;
   title.addEventListener("click", (event) => { event.stopPropagation(); void openCommunityDesign(design.id); });
-  const owner = document.createElement("button"); owner.className = "community-owner profile-link"; owner.type = "button"; owner.textContent = `by ${design.nickname ?? "designer"}`;
+  const owner = document.createElement("button"); owner.className = "community-owner profile-link"; owner.type = "button"; owner.textContent = `${t("by")} ${design.nickname ?? t("design")}`;
   if (design.user_id) owner.addEventListener("click", (event) => { event.stopPropagation(); navigateProfile(design.user_id!); });
   row.append(title, owner, ratingWidget(design, design.user_id)); return row;
 }
@@ -386,16 +419,16 @@ async function renderAccount(button: HTMLButtonElement): Promise<void> {
   button.className = "auth-button";
   button.onclick = () => accountDialog.hidden = false;
   profileNavButton.hidden = false;
-  button.textContent = "SIGN IN / REGISTER";
+  button.textContent = t("signInRegister");
   renderWorkshopSave();
   const title = accountDialog.querySelector(".account-title") as HTMLElement;
   if (!user) {
-    title.textContent = "Your account";
-    designList.innerHTML = `<div class="auth-tabs"><button type="button" class="auth-tab auth-tab-on" data-mode="login">SIGN IN</button><button type="button" class="auth-tab" data-mode="register">CREATE ACCOUNT</button></div><div class="auth-form-host"></div>`;
+    title.textContent = t("account");
+    designList.innerHTML = `<div class="auth-tabs"><button type="button" class="auth-tab auth-tab-on" data-mode="login">${t("signIn")}</button><button type="button" class="auth-tab" data-mode="register">${t("signUp")}</button></div><div class="auth-form-host"></div>`;
     const host = designList.querySelector(".auth-form-host") as HTMLElement;
     const show = (mode: "login" | "register") => {
       for (const tab of designList.querySelectorAll(".auth-tab")) tab.classList.toggle("auth-tab-on", (tab as HTMLElement).dataset.mode === mode);
-      host.innerHTML = `<form class="account-form">${mode === "register" ? '<input name="nickname" placeholder="Nickname" minlength="2" maxlength="24" pattern="[A-Za-z0-9_-]+" required />' : ""}<input name="email" type="email" placeholder="Email" required /><input name="password" type="password" placeholder="Password (8+ characters)" minlength="8" required /><button class="auth-submit" type="submit">${mode === "register" ? "CREATE ACCOUNT" : "SIGN IN"}</button><p class="account-message"></p></form>`;
+      host.innerHTML = `<form class="account-form">${mode === "register" ? `<input name="nickname" placeholder="${t("nickname")}" minlength="2" maxlength="24" pattern="[A-Za-z0-9_-]+" required />` : ""}<input name="email" type="email" placeholder="${t("email")}" required /><input name="password" type="password" placeholder="${t("password")}" minlength="8" required /><button class="auth-submit" type="submit">${mode === "register" ? t("signUp") : t("signIn")}</button><p class="account-message"></p></form>`;
       const form = host.querySelector("form") as HTMLFormElement;
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -413,10 +446,10 @@ async function renderAccount(button: HTMLButtonElement): Promise<void> {
     show("login");
     return;
   }
-  title.textContent = "Your account";
+  title.textContent = t("account");
   const own = await fetchProfile(user.id);
   const details = own.user;
-  designList.innerHTML = `<div class="account-toolbar"><button class="profile-link own-profile" type="button">@${escapeHtml(user.nickname)}</button><span>${escapeHtml(user.email)}</span><button class="sign-out" type="button">SIGN OUT</button></div><p class="group">Profile information</p><form class="profile-form"><div class="profile-fields"><input name="avatar_url" type="url" placeholder="Avatar image URL" value="${escapeHtml(details.avatar_url)}" /><input name="first_name" placeholder="First name" maxlength="60" value="${escapeHtml(details.first_name)}" /><input name="last_name" placeholder="Last name" maxlength="60" value="${escapeHtml(details.last_name)}" /><input name="city" placeholder="City" maxlength="100" value="${escapeHtml(details.city)}" /><input name="website" type="url" placeholder="Website URL" value="${escapeHtml(details.website)}" /><input name="social_link" type="url" placeholder="Social profile URL" value="${escapeHtml(details.social_link)}" /></div><textarea name="bio" maxlength="1000" placeholder="About you">${escapeHtml(details.bio)}</textarea><button type="submit">SAVE PROFILE</button></form><p class="profile-message"></p><p class="group">Save current design</p><form class="save-form"><input name="name" value="My cover" maxlength="100" /><button type="submit">SAVE CURRENT DESIGN</button></form><p class="account-message"></p><div class="design-items"></div>`;
+  designList.innerHTML = `<div class="account-toolbar"><button class="profile-link own-profile" type="button">@${escapeHtml(user.nickname)}</button><span>${escapeHtml(user.email)}</span><button class="sign-out" type="button">${t("signOut")}</button></div><p class="group">${t("profileInformation")}</p><form class="profile-form"><div class="profile-fields"><input name="avatar_url" type="url" placeholder="${t("avatarUrl")}" value="${escapeHtml(details.avatar_url)}" /><input name="first_name" placeholder="${t("firstName")}" maxlength="60" value="${escapeHtml(details.first_name)}" /><input name="last_name" placeholder="${t("lastName")}" maxlength="60" value="${escapeHtml(details.last_name)}" /><input name="city" placeholder="${t("city")}" maxlength="100" value="${escapeHtml(details.city)}" /><input name="website" type="url" placeholder="${t("website")}" value="${escapeHtml(details.website)}" /><input name="social_link" type="url" placeholder="${t("social")}" value="${escapeHtml(details.social_link)}" /></div><textarea name="bio" maxlength="1000" placeholder="${t("about")}">${escapeHtml(details.bio)}</textarea><button type="submit">${t("saveProfile")}</button></form><p class="profile-message"></p><p class="group">${t("saveCurrentDesignTitle")}</p><form class="save-form"><input name="name" value="My cover" maxlength="100" placeholder="${t("designName")}" /><button type="submit">${t("saveDesign")}</button></form><p class="account-message"></p><div class="design-items"></div>`;
   const message = designList.querySelector(".account-message") as HTMLElement;
   const items = designList.querySelector(".design-items") as HTMLElement;
   const designs = own.designs;
@@ -428,7 +461,7 @@ async function renderAccount(button: HTMLButtonElement): Promise<void> {
     del.addEventListener("click", async () => { await removeDesign(design.id); void renderAccount(button); });
     item.append(load, del); items.append(item);
   }
-  if (!designs.length) items.textContent = "No saved designs yet.";
+  if (!designs.length) items.textContent = t("noSavedDesigns");
   designList.querySelector(".own-profile")!.addEventListener("click", () => navigateProfile(user!.id));
   designList.querySelector(".profile-form")!.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -445,13 +478,13 @@ async function renderAccount(button: HTMLButtonElement): Promise<void> {
         website: String(data.get("website")),
         social_link: String(data.get("social_link")),
       });
-      profileMessage.textContent = "Profile saved";
+      profileMessage.textContent = t("profileSaved");
     } catch (error) { profileMessage.textContent = (error as Error).message; }
   });
   designList.querySelector(".save-form")!.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = String(new FormData(event.currentTarget as HTMLFormElement).get("name"));
-    try { await saveDesign(name, params); message.textContent = "Design saved"; void renderAccount(button); }
+    try { await saveDesign(name, params); message.textContent = t("designSaved"); void renderAccount(button); }
     catch (error) { message.textContent = (error as Error).message; }
   });
   designList.querySelector(".sign-out")!.addEventListener("click", async () => { await signOut(); user = null; void renderAccount(button); route(); });
@@ -459,6 +492,7 @@ async function renderAccount(button: HTMLButtonElement): Promise<void> {
 
 async function openDesign(id: number): Promise<void> {
   const design = await loadDesign(id);
+  activeWorkshopDesign = null;
   renderWorkshopRating(null);
   params = { ...design.params };
   silhouette = null;
@@ -471,6 +505,7 @@ async function openDesign(id: number): Promise<void> {
 
 async function openCommunityDesign(id: number): Promise<void> {
   const design = await communityDesign(id);
+  activeWorkshopDesign = design;
   renderWorkshopRating(design);
   params = { ...design.params };
   silhouette = null;
@@ -530,8 +565,8 @@ function avatarFor(person: PublicProfile["user"], editable = false, onFile?: (fi
   const wrap = document.createElement(editable ? "button" : "div"); wrap.className = "profile-avatar";
   if (editable) {
     (wrap as HTMLButtonElement).type = "button";
-    wrap.setAttribute("aria-label", "Change avatar");
-    wrap.title = "Change avatar";
+    wrap.setAttribute("aria-label", t("changeAvatar"));
+    wrap.title = t("changeAvatar");
   }
   const fallback = document.createElement("span"); fallback.textContent = person.nickname.slice(0, 2).toUpperCase(); wrap.append(fallback);
   if (person.avatar_url) {
@@ -548,11 +583,11 @@ function avatarFor(person: PublicProfile["user"], editable = false, onFile?: (fi
     input.addEventListener("change", () => {
       const file = input.files?.[0];
       if (!file) return;
-      if (!file.type.startsWith("image/")) { status.textContent = "Choose an image file"; return; }
-      if (file.size > 2 * 1024 * 1024) { status.textContent = "Image must be 2 MB or smaller"; return; }
+      if (!file.type.startsWith("image/")) { status.textContent = t("chooseImage"); return; }
+      if (file.size > 2 * 1024 * 1024) { status.textContent = t("avatarSize"); return; }
       const preview = document.createElement("img"); preview.src = URL.createObjectURL(file); preview.alt = `${person.nickname} avatar preview`;
       wrap.querySelectorAll("img").forEach((image) => image.remove());
-      fallback.hidden = true; wrap.append(preview, status, input); status.textContent = "Uploading…";
+      fallback.hidden = true; wrap.append(preview, status, input); status.textContent = t("uploading");
       onFile(file, status);
     });
     wrap.append(input);
@@ -562,10 +597,10 @@ function avatarFor(person: PublicProfile["user"], editable = false, onFile?: (fi
 
 function activityHeatmap(data: PublicProfile["activity"]): HTMLElement {
   const section = document.createElement("section"); section.className = "profile-section";
-  const title = document.createElement("h2"); title.textContent = "Activity"; section.append(title);
+  const title = document.createElement("h2"); title.textContent = t("activity"); section.append(title);
   const counts = new Map(data.map((day) => [day.date, day.count]));
   const max = Math.max(1, ...data.map((day) => day.count));
-  const grid = document.createElement("div"); grid.className = "activity-grid"; grid.setAttribute("aria-label", "Activity during the last year");
+  const grid = document.createElement("div"); grid.className = "activity-grid"; grid.setAttribute("aria-label", t("activityAria"));
   const end = new Date(); end.setHours(0, 0, 0, 0);
   const start = new Date(end); start.setDate(start.getDate() - 364 - start.getDay());
   for (const day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
@@ -573,20 +608,20 @@ function activityHeatmap(data: PublicProfile["activity"]): HTMLElement {
     const count = counts.get(key) ?? 0;
     const cell = document.createElement("span"); cell.className = "activity-day";
     cell.dataset.level = count ? String(Math.max(1, Math.ceil((count / max) * 4))) : "0";
-    cell.title = `${key}: ${count} ${count === 1 ? "action" : "actions"}`;
+    cell.title = `${key}: ${count} ${count === 1 ? t("action") : t("actions")}`;
     grid.append(cell);
   }
-  const legend = document.createElement("div"); legend.className = "activity-legend"; legend.append(document.createTextNode("Less"));
+  const legend = document.createElement("div"); legend.className = "activity-legend"; legend.append(document.createTextNode(t("less")));
   for (let level = 0; level <= 4; level += 1) { const cell = document.createElement("span"); cell.className = "activity-day"; cell.dataset.level = String(level); legend.append(cell); }
-  legend.append(document.createTextNode("More")); section.append(grid, legend); return section;
+  legend.append(document.createTextNode(t("more"))); section.append(grid, legend); return section;
 }
 
 function ownerProfileTools(data: PublicProfile): HTMLElement {
   const section = document.createElement("section"); section.className = "profile-owner-tools";
-  const heading = document.createElement("h2"); heading.textContent = "Your settings"; section.append(heading);
+  const heading = document.createElement("h2"); heading.textContent = t("yourSettings"); section.append(heading);
   const form = document.createElement("form"); form.className = "profile-form";
   const avatarUrl = data.user.avatar_url.startsWith("/api/") ? "" : data.user.avatar_url;
-  form.innerHTML = `<div class="profile-fields"><input name="avatar_url" type="url" placeholder="Avatar image URL" value="${escapeHtml(avatarUrl)}" /><input name="first_name" placeholder="First name" maxlength="60" value="${escapeHtml(data.user.first_name)}" /><input name="last_name" placeholder="Last name" maxlength="60" value="${escapeHtml(data.user.last_name)}" /><input name="city" placeholder="City" maxlength="100" value="${escapeHtml(data.user.city)}" /><input name="website" type="url" placeholder="Website URL" value="${escapeHtml(data.user.website)}" /><input name="social_link" type="url" placeholder="Social profile URL" value="${escapeHtml(data.user.social_link)}" /></div><textarea name="bio" maxlength="1000" placeholder="About you">${escapeHtml(data.user.bio)}</textarea><button type="submit">SAVE PROFILE</button><p class="profile-message"></p>`;
+  form.innerHTML = `<div class="profile-fields"><input name="avatar_url" type="url" placeholder="${t("avatarUrl")}" value="${escapeHtml(avatarUrl)}" /><input name="first_name" placeholder="${t("firstName")}" maxlength="60" value="${escapeHtml(data.user.first_name)}" /><input name="last_name" placeholder="${t("lastName")}" maxlength="60" value="${escapeHtml(data.user.last_name)}" /><input name="city" placeholder="${t("city")}" maxlength="100" value="${escapeHtml(data.user.city)}" /><input name="website" type="url" placeholder="${t("website")}" value="${escapeHtml(data.user.website)}" /><input name="social_link" type="url" placeholder="${t("social")}" value="${escapeHtml(data.user.social_link)}" /></div><textarea name="bio" maxlength="1000" placeholder="${t("about")}">${escapeHtml(data.user.bio)}</textarea><button type="submit">${t("saveProfile")}</button><p class="profile-message"></p>`;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const values = new FormData(form);
@@ -601,19 +636,19 @@ function ownerProfileTools(data: PublicProfile): HTMLElement {
         website: String(values.get("website")),
         social_link: String(values.get("social_link")),
       });
-      message.textContent = "Profile saved";
+      message.textContent = t("profileSaved");
       await renderProfile(data.user.id);
     } catch (error) { message.textContent = (error as Error).message; }
   });
   section.append(form);
 
-  const saveHeading = document.createElement("h2"); saveHeading.textContent = "Save a design"; section.append(saveHeading);
-  const save = document.createElement("form"); save.className = "save-form"; save.innerHTML = `<input name="name" value="My cover" maxlength="100" /><button type="submit">SAVE CURRENT DESIGN</button><p class="profile-message"></p>`;
+  const saveHeading = document.createElement("h2"); saveHeading.textContent = t("saveADesign"); section.append(saveHeading);
+  const save = document.createElement("form"); save.className = "save-form"; save.innerHTML = `<input name="name" value="My cover" maxlength="100" placeholder="${t("designName")}" /><button type="submit">${t("saveDesign")}</button><p class="profile-message"></p>`;
   save.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = String(new FormData(save).get("name"));
     const message = save.querySelector(".profile-message") as HTMLElement;
-    try { await saveDesign(name, params); message.textContent = "Design saved"; await renderProfile(data.user.id); }
+    try { await saveDesign(name, params); message.textContent = t("designSaved"); await renderProfile(data.user.id); }
     catch (error) { message.textContent = (error as Error).message; }
   });
   section.append(save);
@@ -621,15 +656,15 @@ function ownerProfileTools(data: PublicProfile): HTMLElement {
 }
 
 async function renderProfile(id: number): Promise<void> {
-  profilePage.replaceChildren(Object.assign(document.createElement("p"), { className: "profile-loading", textContent: "Loading profile…" }));
+  profilePage.replaceChildren(Object.assign(document.createElement("p"), { className: "profile-loading", textContent: t("loadingProfile") }));
   try {
     const data = await fetchProfile(id);
     profilePage.replaceChildren();
     const top = document.createElement("div"); top.className = "profile-topbar";
-    const back = document.createElement("button"); back.type = "button"; back.textContent = "← BACK TO CONFIGURATOR"; back.addEventListener("click", leaveProfile); top.append(back);
+    const back = document.createElement("button"); back.type = "button"; back.textContent = t("backConfigurator"); back.addEventListener("click", leaveProfile); top.append(back);
     if (data.is_owner) {
       const actions = document.createElement("div"); actions.className = "profile-top-actions";
-      const signout = document.createElement("button"); signout.type = "button"; signout.textContent = "SIGN OUT";
+      const signout = document.createElement("button"); signout.type = "button"; signout.textContent = t("signOut");
       signout.addEventListener("click", async () => { await signOut(); user = null; await renderAccount(authButton); navigateWorkshop(); });
       actions.append(signout); top.append(actions);
     }
@@ -638,7 +673,7 @@ async function renderProfile(id: number): Promise<void> {
     const avatar = avatarFor(data.user, data.is_owner, async (file, status) => {
       try {
         await uploadAvatar(file);
-        status.textContent = "Saved";
+        status.textContent = t("uploadSaved");
         await renderAccount(authButton);
         await renderProfile(data.user.id);
       } catch (error) { status.textContent = (error as Error).message; }
@@ -652,14 +687,15 @@ async function renderProfile(id: number): Promise<void> {
     if (data.is_owner && user) identity.append(Object.assign(document.createElement("p"), { className: "profile-email", textContent: user.email }));
     if (data.user.bio) identity.append(Object.assign(document.createElement("p"), { className: "profile-bio", textContent: data.user.bio }));
     const links = document.createElement("div"); links.className = "profile-links";
-    for (const [label, href] of [["Website", data.user.website], ["Social profile", data.user.social_link]]) if (href) { const link = document.createElement("a"); link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = label; links.append(link); }
+    for (const [label, href] of [[t("websiteLink"), data.user.website], [t("socialLink"), data.user.social_link]]) if (href) { const link = document.createElement("a"); link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = label; links.append(link); }
     if (links.childElementCount) identity.append(links); header.append(identity);
 
     const stats = document.createElement("div"); stats.className = "profile-stats";
     for (const [value, label] of [[String(data.stats.designs), "Designs"], [data.stats.average ? data.stats.average.toFixed(1) : "—", "Average rating"], [String(data.stats.ratings), "Ratings"]]) {
-      const item = document.createElement("div"); item.append(Object.assign(document.createElement("strong"), { textContent: value }), Object.assign(document.createElement("span"), { textContent: label })); stats.append(item);
+      const localizedLabel = label === "Designs" ? t("designs") : label === "Average rating" ? t("averageRating") : t("ratingsLabel");
+      const item = document.createElement("div"); item.append(Object.assign(document.createElement("strong"), { textContent: value }), Object.assign(document.createElement("span"), { textContent: localizedLabel })); stats.append(item);
     }
-    const designs = document.createElement("section"); designs.className = "profile-section"; designs.append(Object.assign(document.createElement("h2"), { textContent: "Designs" }));
+    const designs = document.createElement("section"); designs.className = "profile-section"; designs.append(Object.assign(document.createElement("h2"), { textContent: t("allDesigns") }));
     const list = document.createElement("div"); list.className = "profile-designs";
     for (const design of data.designs) {
       const card = document.createElement("article"); card.className = "profile-design-card";
@@ -668,19 +704,20 @@ async function renderProfile(id: number): Promise<void> {
       const name = document.createElement("button"); name.type = "button"; name.className = "profile-design-open"; name.textContent = design.name; name.addEventListener("click", (event) => { event.stopPropagation(); void open(); });
       const rating = document.createElement("span"); rating.textContent = design.rating.count ? `★ ${design.rating.average.toFixed(1)} · ${design.rating.count} ratings` : "No ratings yet";
       const date = document.createElement("time"); date.textContent = new Date(design.created_at * 1000).toLocaleDateString();
+      rating.textContent = design.rating.count ? `★ ${design.rating.average.toFixed(1)} · ${design.rating.count} ${t("ratings")}` : t("noRatings");
       card.append(name, rating, date); list.append(card);
       if (data.is_owner) {
-        const remove = document.createElement("button"); remove.type = "button"; remove.className = "profile-design-delete"; remove.textContent = "DELETE";
+        const remove = document.createElement("button"); remove.type = "button"; remove.className = "profile-design-delete"; remove.textContent = t("delete");
         remove.addEventListener("click", async (event) => { event.stopPropagation(); await removeDesign(design.id); await renderProfile(data.user.id); }); card.append(remove);
       }
     }
-    if (!data.designs.length) list.append(Object.assign(document.createElement("p"), { className: "community-empty", textContent: "No published designs yet." }));
+    if (!data.designs.length) list.append(Object.assign(document.createElement("p"), { className: "community-empty", textContent: t("noPublished") }));
     designs.append(list);
     profilePage.append(top, header, stats, activityHeatmap(data.activity));
     if (data.is_owner) profilePage.append(ownerProfileTools(data));
     profilePage.append(designs);
   } catch (error) {
-    profilePage.innerHTML = `<div class="profile-error"><h1>Profile unavailable</h1><p>${escapeHtml((error as Error).message)}</p><button type="button">BACK TO CONFIGURATOR</button></div>`;
+    profilePage.innerHTML = `<div class="profile-error"><h1>${t("profileUnavailable")}</h1><p>${escapeHtml((error as Error).message)}</p><button type="button">${t("backConfigurator")}</button></div>`;
     profilePage.querySelector("button")!.addEventListener("click", leaveProfile);
   }
 }
@@ -699,6 +736,8 @@ function refreshPanel(): void {
 }
 
 function buildMasthead(): void {
+  masthead.querySelectorAll(".masthead-title, .masthead-subtitle, .masthead-spec").forEach((node) => node.remove());
+  specLine = null;
   const { title, subtitle, specLabel } = strings.masthead;
   if (has(title)) {
     const node = document.createElement("h1");
@@ -740,6 +779,43 @@ function workshopBottomUi(): void {
   document.body.insertBefore(workshopBottomBar, panelRoot);
   renderWorkshopSave();
   renderWorkshopRating(null);
+}
+
+async function refreshLocalizedUi(): Promise<void> {
+  updateLanguageButton();
+  headerActions.setAttribute("aria-label", t("accountCommunity"));
+  const workshopButton = headerActions.querySelector(".workshop-button");
+  if (workshopButton) { workshopButton.textContent = t("navWorkshop"); (workshopButton as HTMLElement).title = t("openConfigurator"); }
+  const communityButton = headerActions.querySelector(".community-button");
+  if (communityButton) communityButton.textContent = t("navCommunity");
+  const profileButton = headerActions.querySelector(".profile-button");
+  if (profileButton) { profileButton.textContent = t("navProfile"); (profileButton as HTMLElement).title = t("openProfile"); }
+  if (!user && authButton) authButton.textContent = t("signInRegister");
+  const communityTitle = communityDialog.querySelector(".group");
+  if (communityTitle) communityTitle.textContent = t("community");
+  const communityHeading = communityDialog.querySelector(".account-title");
+  if (communityHeading) communityHeading.textContent = t("publicDesigns");
+  const communitySearch = communityDialog.querySelector("[name=search]") as HTMLInputElement | null;
+  if (communitySearch) communitySearch.placeholder = t("findDesign");
+  const communitySearchButton = communityDialog.querySelector(".community-search button");
+  if (communitySearchButton) communitySearchButton.textContent = t("search");
+  buildMasthead();
+  if (panel) {
+    panel.refreshStrings();
+    refreshPanel();
+  }
+  renderWorkshopSave();
+  renderWorkshopRating(activeWorkshopDesign);
+  if (!communityDialog.hidden) {
+    const search = (communityDialog.querySelector("[name=search]") as HTMLInputElement).value;
+    await renderCommunity(search);
+  }
+  if (!accountDialog.hidden) {
+    await renderAccount(authButton);
+    accountDialog.hidden = false;
+  }
+  const match = window.location.pathname.match(/^\/profile\/(\d+)\/?$/);
+  if (match && !profilePage.hidden) await renderProfile(Number(match[1]));
 }
 
 function updateSpec(): void {
@@ -847,6 +923,7 @@ async function start(): Promise<void> {
   accountUi();
   communityUi();
   navigationUi();
+  languageUi();
   profileUi();
   void renderAccount(authButton);
   panel = new Panel(panelRoot, schema, {
@@ -898,6 +975,7 @@ async function start(): Promise<void> {
       }
     },
   });
+  subscribe(() => { void refreshLocalizedUi(); });
   panel.setSilhouette(null, "");
   refreshPanel();
   void route();

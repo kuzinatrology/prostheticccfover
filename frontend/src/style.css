@@ -89,6 +89,10 @@ body {
 .header-actions .community-button { order: 2; }
 .header-actions .profile-button { order: 3; }
 .header-actions .auth-button { order: 4; }
+.header-actions .language-switch { order: 5; }
+.language-switch { display: inline-flex; align-items: center; gap: 4px; padding: 8px 9px; border: 1px solid var(--rule); background: rgba(233, 234, 230, .78); color: var(--muted); font: 600 10px Archivo, sans-serif; letter-spacing: .08em; cursor: pointer; }
+.language-switch:hover { border-color: var(--ink); color: var(--ink); }
+.language-switch [data-locale].active { color: var(--accent); font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 .workshop-bottom-bar { position: fixed; left: 34px; right: calc(var(--panel-width) + 34px); bottom: 24px; z-index: 5; display: flex; align-items: flex-end; gap: 24px; pointer-events: none; }
 .workshop-bottom-bar > section { min-width: 0; pointer-events: auto; }
 .workshop-save-area { flex: 0 1 390px; max-width: 390px; }
