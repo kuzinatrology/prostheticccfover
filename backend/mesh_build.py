@@ -548,3 +548,208 @@ def split_halves(body: Manifold, clearance: float) -> Manifold:
             half = max(parts, key=lambda m: m.volume())
         pieces.append(half)
     return Manifold.batch_boolean(pieces, OpType.Add)
+
+
+# --- slabs: a region of the surface, given a thickness ---------------------
+
+SLAB_SIMPLIFY = 1e-4
+"""Outline simplification in (u, v) before a slab is triangulated: about a
+twentieth of a millimetre on a leg."""
+
+
+def slab(
+    surface,
+    region: Polygon,
+    outer,
+    inner,
+    chord: float,
+) -> trimesh.Trimesh | None:
+    """A closed solid over a patch of the surface, between two offsets.
+
+    `region` is a polygon in (u, v), holes allowed. `outer` and `inner` give
+    the offset along the outward normal, in mm, of the two faces: numbers, or
+    functions of an (n, 2) array of (u, v). A half of the cover is a slab from
+    0 to -wall; a shelf under a seam is a slab from -a to -b.
+
+    The prism caps get away with a constrained triangulation of their own
+    outline because a hole is small. A half of a cover is not: a triangulation
+    of its outline alone is a fan of slivers two hundred millimetres long, and
+    splitting slivers only makes more of them. So the face is seeded inside
+    with points a chord apart, laid out in millimetres, and triangulated with
+    them; the outline is sampled twice as finely so its edges survive.
+    """
+    region = region.simplify(SLAB_SIMPLIFY, preserve_topology=True)
+    if region.is_empty or region.area <= 0:
+        return None
+    built = _seeded_triangulation(surface, region, chord)
+    if built is None:
+        return None
+    uv, tris = built
+    point, normal = surface.frame(uv[:, 0], uv[:, 1])
+
+    def offset(spec) -> np.ndarray:
+        value = spec(uv) if callable(spec) else spec
+        return np.broadcast_to(np.asarray(value, dtype=float), (len(uv),))
+
+    top = point + normal * offset(outer)[:, None]
+    bot = point + normal * offset(inner)[:, None]
+    n = len(uv)
+    side = _boundary_edges(tris)
+    s0, s1 = side[:, 0], side[:, 1]
+    faces = np.vstack(
+        [
+            tris,
+            tris[:, ::-1] + n,
+            np.stack([s0, s0 + n, s1 + n], axis=1),
+            np.stack([s0, s1 + n, s1], axis=1),
+        ]
+    ).astype(np.int64)
+    vertices = np.vstack([top, bot])
+    faces = _flip_if_inverted(vertices, faces)
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+
+def _seeded_triangulation(surface, region: Polygon, chord: float):
+    """Triangles over `region` with edges about `chord` long on the surface.
+
+    Worked in a chart scaled to millimetres at the region's middle. The scale
+    drifts across a large region, so the result is then refined on the real
+    surface, which from well-shaped triangles only splits a few.
+    """
+    from scipy.spatial import Delaunay
+    from shapely import contains_xy
+
+    c = region.representative_point()
+    e = 1e-4
+    p0 = surface.point(c.x, c.y)
+    sx = float(np.linalg.norm(surface.point(c.x + e, c.y) - p0) / e)
+    sy = float(np.linalg.norm(surface.point(c.x, min(c.y + e, 1.0)) - p0) / e)
+    scale = np.array([sx, sy])
+
+    rings = [np.asarray(region.exterior.coords)[:-1]] + [
+        np.asarray(r.coords)[:-1] for r in region.interiors
+    ]
+    border = []
+    for ring in rings:
+        probe = surface.point(ring[:, 0], ring[:, 1])
+        edge = np.linalg.norm(np.roll(probe, -1, axis=0) - probe, axis=1)
+        ring = _densify(ring, edge, chord / 2.0)
+        # The chart's scale is the region's middle, and the leg is wider or
+        # narrower elsewhere: the outline must be fine in the chart as well.
+        flat = np.linalg.norm((np.roll(ring, -1, axis=0) - ring) * scale, axis=1)
+        ring = _densify(ring, flat, chord / 2.0)
+        # A repeated point is dropped by the triangulation, which then walks
+        # the outline through its twin the wrong way round.
+        step = np.linalg.norm((np.roll(ring, -1, axis=0) - ring) * scale, axis=1)
+        border.append(ring[step > 1e-6])
+    border_uv = np.vstack(border)
+    _, first = np.unique(np.round(border_uv * scale, 6), axis=0, return_index=True)
+    if len(first) != len(border_uv):
+        return _constrained_triangulation(surface, border, chord)
+
+    chart = Polygon(*(lambda rs: (rs[0] * scale, [r * scale for r in rs[1:]]))(border))
+    inner = chart.buffer(-0.7 * chord)
+    seeds = np.zeros((0, 2))
+    if not inner.is_empty:
+        x0, y0, x1, y1 = inner.bounds
+        h = chord * np.sqrt(3.0) / 2.0
+        ys = np.arange(y0, y1 + h, h)
+        xs = np.arange(x0, x1 + chord, chord)
+        gx, gy = np.meshgrid(xs, ys)
+        gx = gx + (np.arange(len(ys))[:, None] % 2) * chord / 2.0
+        pts = np.stack([gx.ravel(), gy.ravel()], axis=1)
+        seeds = pts[contains_xy(inner, pts[:, 0], pts[:, 1])]
+
+    points = np.vstack([border_uv * scale, seeds])
+    tri = Delaunay(points).simplices
+    cent = points[tri].mean(axis=1)
+    tri = tri[contains_xy(chart, cent[:, 0], cent[:, 1])]
+    if not len(tri):
+        return None
+
+    uv = points / scale
+    # Measured in the chart, in square millimetres: a triangle laid along a
+    # straight run of the outline has next to no area, and halving it later
+    # can turn its sign over in floating point.
+    a, b, cc = points[tri[:, 0]], points[tri[:, 1]], points[tri[:, 2]]
+    turn = (b[:, 0] - a[:, 0]) * (cc[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (cc[:, 0] - a[:, 0])
+    solid = np.abs(turn) > 1e-3 * chord * chord
+    tri, turn = tri[solid], turn[solid]
+    tri[turn < 0.0] = tri[turn < 0.0][:, [0, 2, 1]]
+
+    # Every border point must have made it into the triangulation's outline
+    # the same number of times as it sits on a ring, or the outline did not
+    # survive and the slower, sure route is taken.
+    tri = _untie(tri)
+    lost = abs(len(_boundary_edges(tri)) - len(border_uv))
+    if lost > 0.02 * len(border_uv) or not _is_disc_like(tri):
+        return _constrained_triangulation(surface, border, chord)
+
+    def on_surface(q: np.ndarray) -> np.ndarray:
+        return surface.point(q[:, 0], q[:, 1])
+
+    uv, tri, _ = _refine(uv, tri, np.zeros(len(uv), dtype=np.int64), on_surface, chord * 1.5)
+    return uv, tri
+
+
+def _untie(tris: np.ndarray, rounds: int = 6) -> np.ndarray:
+    """Open every pinch where two fans of triangles meet at one vertex.
+
+    A narrow neck in an outline can come out of the triangulation as two
+    triangles touching corner to corner, and a solid built on that is not a
+    manifold. The triangles on the outline at such a vertex are dropped, which
+    narrows the neck by one triangle and nothing else.
+    """
+    for _ in range(rounds):
+        if len(tris) == 0:
+            return tris
+        side = _boundary_edges(tris)
+        starts = np.bincount(side[:, 0], minlength=int(tris.max()) + 1)
+        tied = np.nonzero(starts > 1)[0]
+        if not len(tied):
+            return tris
+        on_outline = np.zeros(len(starts), dtype=bool)
+        on_outline[side[:, 0]] = True
+        ends = np.stack([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]], axis=1)
+        span = int(tris.max()) + 1
+        key = np.minimum(ends[..., 0], ends[..., 1]).astype(np.int64) * span + np.maximum(ends[..., 0], ends[..., 1])
+        skey = np.minimum(side[:, 0], side[:, 1]).astype(np.int64) * span + np.maximum(side[:, 0], side[:, 1])
+        touches_outline = np.isin(key, skey).any(axis=1)
+        at_tie = np.isin(tris, tied).any(axis=1)
+        tris = tris[~(at_tie & touches_outline)]
+    return tris
+
+
+def _is_disc_like(tris: np.ndarray) -> bool:
+    """No vertex where two fans of triangles touch at a single point."""
+    side = _boundary_edges(tris)
+    starts = np.bincount(side[:, 0], minlength=int(tris.max()) + 1)
+    return bool(starts.max(initial=0) <= 1)
+
+
+def _constrained_triangulation(surface, border: list[np.ndarray], chord: float):
+    shape = Polygon(border[0], border[1:])
+    if not shape.is_valid or shape.area <= 0:
+        return None
+    uv = np.vstack(border)
+    cells = constrained_delaunay_triangles(shape)
+    if not get_num_geometries(cells):
+        return None
+    corners = get_coordinates(cells).reshape(-1, 4, 2)[:, :3, :].reshape(-1, 2)
+    rows = np.vstack([uv, corners])
+    _, back = np.unique(rows, axis=0, return_inverse=True)
+    back = back.ravel()
+    lookup = np.full(int(back.max()) + 1, -1, dtype=np.int64)
+    lookup[back[: len(uv)]] = np.arange(len(uv))
+    tris = lookup[back[len(uv) :]].reshape(-1, 3)
+    a, b, c = uv[tris[:, 0]], uv[tris[:, 1]], uv[tris[:, 2]]
+    turn = (b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])
+    keep = (tris.min(axis=1) >= 0) & (turn != 0.0)
+    tris, turn = tris[keep], turn[keep]
+    tris[turn < 0.0] = tris[turn < 0.0][:, [0, 2, 1]]
+
+    def on_surface(q: np.ndarray) -> np.ndarray:
+        return surface.point(q[:, 0], q[:, 1])
+
+    uv, tris, _ = _refine(uv, tris, np.zeros(len(uv), dtype=np.int64), on_surface, chord)
+    return uv, tris

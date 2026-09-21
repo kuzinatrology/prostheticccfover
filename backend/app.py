@@ -202,6 +202,118 @@ def post_download(req: Request, fmt: str = "3mf") -> Response:
     )
 
 
+# --- transfemoral: the scanned leg, its own tab -----------------------------
+
+from .transfemoral import export as tf_export  # noqa: E402
+from .transfemoral.generator import DRAFT as TF_DRAFT  # noqa: E402
+from .transfemoral.generator import FINAL as TF_FINAL  # noqa: E402
+from .transfemoral.generator import TFCover, generate as tf_generate  # noqa: E402
+from .transfemoral.generator import audit as tf_audit  # noqa: E402
+from .transfemoral.params import TFParams, schema as tf_schema  # noqa: E402
+from .transfemoral.presets import as_json as tf_presets_json  # noqa: E402
+
+
+@lru_cache(maxsize=8)
+def _tf_build(frozen: tuple, draft: bool) -> TFCover:
+    params = TFParams(**dict(frozen))
+    return tf_generate(params, quality=TF_DRAFT if draft else TF_FINAL, profile=DEFAULT_PROFILE)
+
+
+def _tf_cover(req: Request) -> tuple[TFCover, float]:
+    params = TFParams.from_dict(req.params)
+    started = time.time()
+    cover = _tf_build(tuple(sorted(params.to_dict().items())), req.draft)
+    return cover, time.time() - started
+
+
+def _tf_stats(cover: TFCover, seconds: float, draft: bool) -> dict[str, Any]:
+    p = cover.params
+    m = p.material_spec
+    return {
+        "mass_g": round(cover.mass_g, 1),
+        "plain_mass_g": round(cover.plain_mass_g, 1),
+        "saving_pct": round(cover.saving_pct),
+        "delta_g": round(cover.mass_g - cover.plain_mass_g, 1),
+        "bodies": {k: round(v, 1) for k, v in cover.masses.items()},
+        "holes": cover.holes,
+        "triangles": sum(len(b.faces) for b in cover.bodies.values()),
+        "max_wall_thickness": round(cover.max_wall, 2),
+        "max_relief_depth": round(cover.max_relief, 2),
+        "limits": {k: [round(lo, 2), round(hi, 2)] for k, (lo, hi) in cover.limits.items()},
+        "operation": p.operation,
+        "cuts_through": p.cuts_through,
+        "notes": cover.notes,
+        "material": {"key": m.key, "label": m.label, "hex": m.hex, "polymer": m.polymer},
+        "finish": {
+            "mode": p.finish,
+            "colour_a": m.hex,
+            "colour_b": p.colour_b_spec.hex,
+            "facet_scale": p.facet_scale,
+        },
+        "explode_mm": tf_export_explode(),
+        "draft": draft,
+        "seconds": round(seconds, 2),
+    }
+
+
+def tf_export_explode() -> float:
+    from .transfemoral import config as tf_config
+
+    return tf_config.EXPLODE_MM
+
+
+@app.get("/api/tf/schema")
+def get_tf_schema() -> dict[str, Any]:
+    out = tf_schema(min_strut=DEFAULT_PROFILE.MIN_STRUT)
+    out["profile"] = {
+        "name": DEFAULT_PROFILE.name,
+        "min_strut": DEFAULT_PROFILE.MIN_STRUT,
+        "min_hole": DEFAULT_PROFILE.MIN_HOLE,
+        "clearance": DEFAULT_PROFILE.CLEARANCE,
+    }
+    out["profiles"] = list(PROFILES)
+    out["formats"] = ["3mf", "stl"]
+    out["presets"] = tf_presets_json()
+    out["bodies"] = list(tf_export.LABELS)
+    return out
+
+
+@app.post("/api/tf/cover")
+def post_tf_cover(req: Request) -> Response:
+    cover, seconds = _tf_cover(req)
+    body = tf_export.preview_glb(cover)
+    stats = _tf_stats(cover, seconds, req.draft)
+    return Response(
+        content=body,
+        media_type="model/gltf-binary",
+        headers={"X-Cover": quote(json.dumps(stats))},
+    )
+
+
+@app.post("/api/tf/download")
+def post_tf_download(req: Request, fmt: str = "3mf", body: str = "all") -> Response:
+    if fmt not in ("3mf", "stl"):
+        raise HTTPException(400, f"unknown format {fmt!r}")
+    cover, _ = _tf_cover(req)
+    faults = tf_audit(cover)
+    if faults:
+        log.error("shipping transfemoral files that failed audit: %s", "; ".join(faults))
+    stem = f"transfemoral-{cover.params.material}-{cover.mass_g:.0f}g"
+    if body == "all":
+        data = tf_export.bundle(cover, fmt)
+        media, name = "application/zip", f"{stem}.zip"
+    elif body in cover.bodies:
+        data = tf_export.body_3mf(cover, body) if fmt == "3mf" else tf_export.body_stl(cover, body)
+        media, name = FORMATS[fmt], f"{stem}-{tf_export.LABELS[body]}.{fmt}"
+    else:
+        raise HTTPException(400, f"unknown body {body!r}")
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 # Mounted last: the API routes above claim their paths first, and everything
 # else falls through to the built page. Absent until `npm run build` has run.
 if BUILT.is_dir():

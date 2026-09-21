@@ -9,3 +9,6 @@ out/
 
 # Sample images are small and handy; the launch agent log is not ours to keep.
 *.log
+
+# Finder metadata.
+.DS_Store

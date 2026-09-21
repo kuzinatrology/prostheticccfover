@@ -34,7 +34,7 @@ const PATTERNED = (p: Params) => p.operation !== "none";
 const MOTIF = (p: Params) => p.operation === "cut" && p.hole_shape === "image";
 const CELLS = (p: Params) => p.operation === "cut" && p.hole_shape !== "image";
 
-const GROUPS: Group[] = [
+export const GROUPS: Group[] = [
   {
     key: "limb",
     params: ["length", "knee_diameter", "ankle_diameter", "calf_bulge", "calf_position", "posterior_bias"],
@@ -85,7 +85,7 @@ const GROUPS: Group[] = [
 ];
 
 /** Rows that only make sense under some other setting. */
-const ROW_WHEN: Record<string, (p: Params) => boolean> = {
+export const ROW_WHEN: Record<string, (p: Params) => boolean> = {
   corner_radius: CELLS,
   strut_width: CUTS,
   hole_shape: CUTS,
@@ -106,6 +106,59 @@ const ROW_WHEN: Record<string, (p: Params) => boolean> = {
   facet_scale: (p) => p.finish === "faceted",
   relief_profile: RELIEF,
   operation: () => true,
+};
+
+/**
+ * The transfemoral tab. The leg is a scan, so the limb and section groups are
+ * gone; the design groups are the same ones; attachment is new.
+ */
+export const TF_GROUPS: Group[] = [
+  { key: "shell", params: ["wall_thickness", "surface_smoothing"] },
+  ...GROUPS.slice(3, 7),
+  {
+    key: "finish",
+    choices: ["finish"],
+    params: ["facet_scale"],
+    block: "materials",
+  },
+  {
+    key: "leaves",
+    toggles: ["back_leaves"],
+    params: ["leaf_count", "leaf_size", "leaf_tilt"],
+    when: CUTS,
+  },
+  {
+    key: "mount",
+    params: [
+      "seam_offset",
+      "seam_solid_width",
+      "magnet_diameter",
+      "magnet_height",
+      "magnet_count",
+      "lower_clamp_z",
+      "upper_clamp_z",
+      "lower_hole_diameter",
+      "upper_hole_width",
+      "upper_hole_depth",
+      "bolt_diameter",
+    ],
+  },
+];
+
+export interface PanelLayout {
+  groups: Group[];
+  rowWhen: Record<string, (p: Params) => boolean>;
+  /** Separate printed bodies: list their weights and offer each one. */
+  bodies: boolean;
+}
+
+export const TRANSTIBIAL: PanelLayout = { groups: GROUPS, rowWhen: ROW_WHEN, bodies: false };
+const LEAVES = (p: Params) => p.operation === "cut" && Boolean(p.back_leaves);
+
+export const TRANSFEMORAL: PanelLayout = {
+  groups: TF_GROUPS,
+  rowWhen: { ...ROW_WHEN, leaf_count: LEAVES, leaf_size: LEAVES, leaf_tilt: LEAVES },
+  bodies: true,
 };
 
 function tag<K extends keyof HTMLElementTagNameMap>(
@@ -133,6 +186,8 @@ export interface PanelHandlers {
   onPreset(preset: PresetSpec): void;
   onDownload(fmt: string): void;
   onPicture(file: File): void;
+  onDownloadBody?(body: string): void;
+  onExplode?(apart: boolean): void;
 }
 
 export class Panel {
@@ -162,10 +217,13 @@ export class Panel {
   private download!: HTMLButtonElement;
   private status!: HTMLElement;
 
+  private bodyRows = new Map<string, HTMLElement>();
+
   constructor(
     private root: HTMLElement,
     private schema: Schema,
     private handlers: PanelHandlers,
+    private layout: PanelLayout = TRANSTIBIAL,
   ) {
     this.build();
   }
@@ -177,7 +235,7 @@ export class Panel {
     this.root.append(this.presetStrip());
 
     const seen = new Set<string>();
-    for (const group of GROUPS) {
+    for (const group of this.layout.groups) {
       const block = tag("div", "block");
       // A group that only continues the one above it repeats no heading.
       const heading = seen.has(group.key) ? "" : strings.groups[group.key];
@@ -193,6 +251,7 @@ export class Panel {
     }
 
     this.root.append(this.readout());
+    if (this.layout.bodies) this.root.append(this.bodiesBlock());
     this.root.append(this.footer());
   }
 
@@ -581,7 +640,7 @@ export class Panel {
   private applyVisibility(params: Params, preset: string | null): void {
     for (const { node, when } of this.blocks) node.hidden = !when(params);
     for (const [key, row] of this.rows) {
-      const rule = ROW_WHEN[key];
+      const rule = this.layout.rowWhen[key];
       if (rule) row.hidden = !rule(params);
     }
     // A tile stays lit only while the design still is that preset. Editing
@@ -600,18 +659,81 @@ export class Panel {
       (slider.parentElement as HTMLElement).style.setProperty("--cap", "100%");
     } else {
       const reach = Number(slider.max);
-      const usable = reach - range.lo;
+      const floor = Number(slider.min);
+      const usable = reach - floor;
       // The control only spans as far as the geometry allows. The rest of the
       // row keeps its dashes, so a shortened range is visible rather than felt.
       slider.style.setProperty(
         "--fill",
-        usable > 0 ? `${((value - range.lo) / usable) * 100}%` : "0%",
+        usable > 0 ? `${((value - floor) / usable) * 100}%` : "0%",
       );
       (slider.parentElement as HTMLElement).style.setProperty(
         "--cap",
-        declared > 0 ? `${(usable / declared) * 100}%` : "100%",
+        declared > 0 ? `${((reach - range.lo) / declared) * 100}%` : "100%",
       );
     }
+    this.values.get(key)!.textContent = value.toFixed(decimals(range.step));
+  }
+
+  // --- separate bodies -----------------------------------------------------
+
+  /** Each printed part: its weight, and its own print file. */
+  private bodiesBlock(): HTMLElement {
+    const words = strings.transfemoral.bodies;
+    const box = tag("div", "block readout");
+    if (has(words.heading)) box.append(tag("p", "group", words.heading));
+    for (const key of this.schema.bodies ?? []) {
+      if (!has(words[key])) continue;
+      const row = tag("div", "readout-row");
+      row.append(tag("span", "readout-label", words[key]));
+      const value = tag("span", "readout-value");
+      const number = tag("span", "readout-number");
+      value.append(number);
+      if (has(strings.readout.massUnit)) {
+        value.append(tag("span", "readout-unit", strings.readout.massUnit));
+      }
+      row.append(value);
+      if (has(strings.transfemoral.downloadBody) && this.handlers.onDownloadBody) {
+        const link = tag("button", "alt-format body-file", strings.transfemoral.downloadBody) as HTMLButtonElement;
+        link.type = "button";
+        link.addEventListener("click", () => this.handlers.onDownloadBody?.(key));
+        row.append(link);
+      }
+      this.bodyRows.set(key, number);
+      box.append(row);
+    }
+    if (has(strings.transfemoral.explode) && this.handlers.onExplode) {
+      const wrap = tag("label", "toggle");
+      const input = tag("input") as HTMLInputElement;
+      input.type = "checkbox";
+      wrap.append(tag("span", "toggle-label", strings.transfemoral.explode), input, tag("span", "toggle-box"));
+      input.addEventListener("change", () => {
+        wrap.classList.toggle("toggle-on", input.checked);
+        this.handlers.onExplode?.(input.checked);
+      });
+      box.append(wrap);
+    }
+    return box;
+  }
+
+  /** Both ends of a track move: a clamp stops above and below, a band has a
+   *  floor set by the magnet it covers. */
+  setLimits(key: string, lo: number, hi: number): void {
+    const slider = this.sliders.get(key);
+    const range = this.schema.ranges[key];
+    if (!slider || !range || range.scale === "log") return;
+    const floor = Math.max(range.lo, Math.min(lo, range.hi));
+    const cap = Math.min(range.hi, Math.max(hi, floor));
+    slider.min = String(floor);
+    slider.max = String(cap);
+    const value = Math.min(Math.max(this.read(key), floor), cap);
+    slider.value = String(value);
+    const declared = range.hi - range.lo;
+    slider.style.setProperty("--fill", cap > floor ? `${((value - floor) / (cap - floor)) * 100}%` : "0%");
+    (slider.parentElement as HTMLElement).style.setProperty(
+      "--cap",
+      declared > 0 ? `${((cap - range.lo) / declared) * 100}%` : "100%",
+    );
     this.values.get(key)!.textContent = value.toFixed(decimals(range.step));
   }
 
@@ -642,6 +764,11 @@ export class Panel {
     this.readouts.get("mass")?.replaceChildren(stats.mass_g.toFixed(1));
     this.readouts.get("holes")?.replaceChildren(String(stats.holes));
     this.readouts.get("triangles")?.replaceChildren(String(stats.triangles));
+    for (const [key, node] of this.bodyRows) {
+      const grams = stats.bodies?.[key];
+      node.replaceChildren(grams === undefined ? "–" : grams.toFixed(1));
+      (node.closest(".readout-row") as HTMLElement).hidden = grams === undefined;
+    }
 
     // Taking material away is a percentage off; putting it on is grams added.
     if (this.summaryLabel) {

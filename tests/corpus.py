@@ -23,22 +23,22 @@ def kind(reason: str) -> str:
     return re.sub(r"[-+]?\d*\.?\d+", "#", reason).strip()
 
 
-def load() -> list[dict]:
-    if not CORPUS.exists():
+def load(path: pathlib.Path = CORPUS) -> list[dict]:
+    if not path.exists():
         return []
-    return [json.loads(line) for line in CORPUS.read_text().splitlines() if line.strip()]
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def record(params: dict, reason: str) -> None:
+def record(params: dict, reason: str, path: pathlib.Path = CORPUS) -> None:
     """Append a failing case unless this kind of failure is well covered."""
-    existing = load()
+    existing = load(path)
     if any(e["params"] == params for e in existing):
         return
     group = kind(reason)
     if sum(1 for e in existing if kind(e["reason"]) == group) >= PER_KIND:
         return
-    CORPUS.parent.mkdir(parents=True, exist_ok=True)
-    with CORPUS.open("a") as fh:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
         fh.write(json.dumps({"reason": reason, "params": params}, sort_keys=True) + "\n")
 
 

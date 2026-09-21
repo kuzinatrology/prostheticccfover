@@ -29,6 +29,7 @@ export interface Schema {
   presets: PresetSpec[];
   profile: { name: string; min_strut: number; min_hole: number; clearance: number };
   formats: string[];
+  bodies?: string[];
 }
 
 export interface Stats {
@@ -47,6 +48,11 @@ export interface Stats {
   finish: { mode: string; colour_a: string; colour_b: string; facet_scale: number };
   draft: boolean;
   seconds: number;
+  /** Transfemoral only: weight of each printed body, in grams. */
+  bodies?: Record<string, number>;
+  /** Transfemoral only: where each moving slider's track now ends. */
+  limits?: Record<string, [number, number]>;
+  explode_mm?: number;
 }
 
 export type Params = Record<string, number | boolean | string>;
@@ -61,8 +67,11 @@ export interface Silhouette {
   notes: string[];
 }
 
-export async function fetchSchema(): Promise<Schema> {
-  const res = await fetch("/api/schema");
+/** Where a tab's service lives: "/api" for the transtibial cover. */
+export type Base = string;
+
+export async function fetchSchema(base: Base = "/api"): Promise<Schema> {
+  const res = await fetch(`${base}/schema`);
   if (!res.ok) throw new Error(String(res.status));
   return res.json();
 }
@@ -76,8 +85,9 @@ export async function fetchCover(
   params: Params,
   draft: boolean,
   signal: AbortSignal,
+  base: Base = "/api",
 ): Promise<CoverResponse> {
-  const res = await fetch("/api/cover", {
+  const res = await fetch(`${base}/cover`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ params, draft }),
@@ -111,8 +121,14 @@ export async function readMotif(params: Params): Promise<Silhouette> {
   return res.json();
 }
 
-export async function downloadCover(params: Params, fmt: string): Promise<void> {
-  const res = await fetch(`/api/download?fmt=${fmt}`, {
+export async function downloadCover(
+  params: Params,
+  fmt: string,
+  base: Base = "/api",
+  body = "",
+): Promise<void> {
+  const which = body ? `&body=${encodeURIComponent(body)}` : "";
+  const res = await fetch(`${base}/download?fmt=${fmt}${which}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ params, draft: false }),

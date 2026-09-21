@@ -48,13 +48,57 @@ body {
   display: block;
 }
 
+/* --- tabs ------------------------------------------------------------ */
+
+/* Two covers. The tabs sit over the masthead as a line of the order form's
+   own type, and the one in use carries the accent. */
+#tabs {
+  position: fixed;
+  top: 12px;
+  left: 34px;
+  z-index: 3;
+  display: flex;
+  gap: 18px;
+}
+
+.tab {
+  padding: 2px 0;
+  font-size: 11px;
+  font-variation-settings: "wdth" 87, "wght" 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab-on {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.body-file {
+  display: inline;
+  width: auto;
+  margin: 0 0 0 10px;
+}
+
 /* --- masthead ------------------------------------------------------- */
 
 #masthead {
   position: fixed;
   top: 0;
   left: 0;
-  padding: 30px 34px;
+  padding: 42px 34px 30px;
   pointer-events: none;
   max-width: calc(100% - var(--panel-width) - 40px);
 }
@@ -723,6 +767,12 @@ body {
   #masthead {
     position: relative;
     max-width: none;
+  }
+  #tabs {
+    position: relative;
+    top: auto;
+    left: auto;
+    padding: 12px 34px 0;
   }
   #panel {
     position: relative;

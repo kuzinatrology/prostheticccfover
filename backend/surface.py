@@ -28,8 +28,61 @@ TWO_PI = 2.0 * np.pi
 # The calf therefore grows toward -y.
 
 
+class SurfaceBase:
+    """What every outer surface offers the pattern, the shell and the prisms.
+
+    A subclass supplies `point(u, v)`, `radius(v)` (the mean radius at a
+    height, which sizes the conformal domain), `length` and
+    `min_curvature_radius()`. Everything below is built on those alone, so an
+    analytic shin and a scanned leg go through the same pipeline.
+    """
+
+    length: float
+
+    def point(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:  # pragma: no cover
+        raise NotImplementedError
+
+    def min_curvature_radius(self) -> float:  # pragma: no cover
+        raise NotImplementedError
+
+    def frame(self, u: np.ndarray, v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Point and outward unit normal, by central differences in (u, v)."""
+        du, dv = 1e-4, 1e-4
+        p = self.point(u, v)
+        tu = (self.point(u + du, v) - self.point(u - du, v)) / (2 * du)
+        vv = np.clip(np.asarray(v, dtype=float), dv, 1.0 - dv)
+        tv = (self.point(u, vv + dv) - self.point(u, vv - dv)) / (2 * dv)
+        n = np.cross(tu, tv)
+        norm = np.linalg.norm(n, axis=-1, keepdims=True)
+        # cross(d/du, d/dv) already points away from the axis.
+        return p, n / np.maximum(norm, 1e-12)
+
+    def grid(self, nu: int, nv: int) -> tuple[np.ndarray, np.ndarray]:
+        """Outer surface as an (nv, nu, 3) point grid plus matching normals."""
+        u = np.linspace(0.0, 1.0, nu, endpoint=False)
+        v = np.linspace(0.0, 1.0, nv)
+        uu, vv = np.meshgrid(u, v)
+        return self.frame(uu, vv)
+
+    # --- the Mercator (conformal) pattern domain ------------------------
+    # A tube of radius r(v) has metric ds^2 = r^2 (dU^2 + dV^2) when
+    # U = 2*pi*u and V = integral(L dv / r(v)). Cells that are round in that
+    # domain are round on the cover, and they grow with the cover's girth.
+    def mercator(self, samples: int = 512) -> tuple[np.ndarray, np.ndarray]:
+        v = np.linspace(0.0, 1.0, samples)
+        integrand = self.length / self.radius(v)
+        V = np.concatenate(
+            [[0.0], np.cumsum(np.diff(v) * (integrand[1:] + integrand[:-1]) / 2)]
+        )
+        return v, V
+
+    def max_wall_thickness(self, profile: PrinterProfile, ceiling: float) -> float:
+        """Dynamic upper bound for the wall_thickness slider."""
+        return min(ceiling, profile.CURVATURE_SAFETY * self.min_curvature_radius())
+
+
 @dataclass
-class Surface:
+class Surface(SurfaceBase):
     """Outer surface of the cover, sampled from analytic definitions."""
 
     length: float
@@ -138,37 +191,6 @@ class Surface:
             [x0 * ct - y0 * st, x0 * st + y0 * ct, v * self.length], axis=-1
         )
 
-    def frame(self, u: np.ndarray, v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Point and outward unit normal, by central differences in (u, v)."""
-        du, dv = 1e-4, 1e-4
-        p = self.point(u, v)
-        tu = (self.point(u + du, v) - self.point(u - du, v)) / (2 * du)
-        vv = np.clip(np.asarray(v, dtype=float), dv, 1.0 - dv)
-        tv = (self.point(u, vv + dv) - self.point(u, vv - dv)) / (2 * dv)
-        n = np.cross(tu, tv)
-        norm = np.linalg.norm(n, axis=-1, keepdims=True)
-        # cross(d/du, d/dv) already points away from the axis.
-        return p, n / np.maximum(norm, 1e-12)
-
-    def grid(self, nu: int, nv: int) -> tuple[np.ndarray, np.ndarray]:
-        """Outer surface as an (nv, nu, 3) point grid plus matching normals."""
-        u = np.linspace(0.0, 1.0, nu, endpoint=False)
-        v = np.linspace(0.0, 1.0, nv)
-        uu, vv = np.meshgrid(u, v)
-        return self.frame(uu, vv)
-
-    # --- the Mercator (conformal) pattern domain ------------------------
-    # A tube of radius r(v) has metric ds^2 = r^2 (dU^2 + dV^2) when
-    # U = 2*pi*u and V = integral(L dv / r(v)). Cells that are round in that
-    # domain are round on the cover, and they grow with the cover's girth.
-    def mercator(self, samples: int = 512) -> tuple[np.ndarray, np.ndarray]:
-        v = np.linspace(0.0, 1.0, samples)
-        integrand = self.length / self.radius(v)
-        V = np.concatenate(
-            [[0.0], np.cumsum(np.diff(v) * (integrand[1:] + integrand[:-1]) / 2)]
-        )
-        return v, V
-
     # --- printability inputs --------------------------------------------
     def min_curvature_radius(self, rows: int = 48, around: int = 256) -> float:
         """Smallest radius of curvature where the surface bulges outward.
@@ -202,7 +224,3 @@ class Surface:
         else:
             r_meridian = np.inf
         return min(r_section, r_meridian)
-
-    def max_wall_thickness(self, profile: PrinterProfile, ceiling: float) -> float:
-        """Dynamic upper bound for the wall_thickness slider."""
-        return min(ceiling, profile.CURVATURE_SAFETY * self.min_curvature_radius())

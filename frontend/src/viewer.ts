@@ -52,6 +52,10 @@ export class Viewer {
   private finish: Finish = { mode: "flat", colour_a: "#17514c", colour_b: "#e3ddd0", facet_scale: 22 };
   private framedRadius = 0;
   private key: DirectionalLight;
+  /** Further bodies of a model that has several; the first one is `current`. */
+  private extras: { mesh: Mesh; source: BufferGeometry; tint: number; apart: boolean }[] = [];
+  private explode = 0;
+  private exploded = false;
 
   constructor(canvas: HTMLCanvasElement, accent: string) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -124,6 +128,36 @@ export class Viewer {
 
   setAccent(hex: string): void {
     this.material.color.set(hex);
+    this.tintExtras();
+  }
+
+  /** Back parts step away from the front by this much, in model millimetres. */
+  setExploded(apart: boolean, mm: number): void {
+    this.exploded = apart;
+    this.explode = mm;
+    this.placeExtras();
+  }
+
+  private placeExtras(): void {
+    for (const part of this.extras) {
+      // Parts hang off the first body, in the model's own millimetres, where
+      // the back of the leg is -y.
+      part.mesh.position.y = this.exploded && part.apart ? -this.explode : 0;
+    }
+  }
+
+  /** The halves read apart by a shade; the clamps are hardware grey. */
+  private tintExtras(): void {
+    for (const part of this.extras) {
+      const material = part.mesh.material as MeshPhysicalMaterial;
+      material.vertexColors = this.material.vertexColors;
+      if (part.tint === 0) {
+        material.color.set("#9ea3a0");
+      } else {
+        material.color.copy(this.material.color).offsetHSL(0, -0.05, part.tint);
+      }
+      material.needsUpdate = true;
+    }
   }
 
   /** Shading only. The mesh is never touched, so weight and file never move. */
@@ -137,23 +171,30 @@ export class Viewer {
 
   private dress(): void {
     if (!this.source || !this.current) return;
+    this.dressOne(this.current, this.source);
+    for (const part of this.extras) this.dressOne(part.mesh, part.source);
+    this.tintExtras();
+  }
+
+  private dressOne(mesh: Mesh, source: BufferGeometry): void {
     const geometry =
-      this.finish.mode === "faceted"
-        ? facet(this.source, this.finish.facet_scale)
-        : this.source.clone();
+      this.finish.mode === "faceted" ? facet(source, this.finish.facet_scale) : source.clone();
     if (this.finish.mode === "gradient") {
       paint(geometry, new Color(this.finish.colour_a), new Color(this.finish.colour_b));
     }
-    const old = this.current.geometry;
-    this.current.geometry = geometry;
-    if (old !== this.source) old.dispose();
+    const old = mesh.geometry;
+    mesh.geometry = geometry;
+    if (old !== source) old.dispose();
   }
 
   async setModel(glb: ArrayBuffer): Promise<void> {
     const gltf = await this.loader.parseAsync(glb, "");
     let geometry: BufferGeometry | null = null;
+    const others: { name: string; geometry: BufferGeometry }[] = [];
     gltf.scene.traverse((node) => {
-      if (!geometry && (node as Mesh).isMesh) geometry = (node as Mesh).geometry;
+      if (!(node as Mesh).isMesh) return;
+      if (!geometry) geometry = (node as Mesh).geometry;
+      else others.push({ name: node.name, geometry: (node as Mesh).geometry });
     });
     if (!geometry) return;
     // The transport mesh carries positions only. Vertices are already split
@@ -175,10 +216,29 @@ export class Viewer {
       this.holder.remove(this.current);
       if (this.current.geometry !== this.source) this.current.geometry.dispose();
     }
+    for (const part of this.extras) {
+      mesh.remove(part.mesh);
+      part.mesh.geometry.dispose();
+      part.source.dispose();
+      (part.mesh.material as MeshPhysicalMaterial).dispose();
+    }
+    this.extras = [];
     this.source?.dispose();
     this.source = geometry;
     this.current = mesh;
     this.holder.add(mesh);
+
+    // Every further body hangs off the first, so it turns and sits with it.
+    for (const { name, geometry: g } of others) {
+      g.computeVertexNormals();
+      const part = new Mesh(g, this.material.clone());
+      part.castShadow = true;
+      part.receiveShadow = true;
+      mesh.add(part);
+      const clamp = name.includes("clamp");
+      this.extras.push({ mesh: part, source: g, tint: clamp ? 0 : 0.09, apart: true });
+    }
+    this.placeExtras();
     this.dress();
     this.frame(new Box3().setFromObject(mesh));
   }

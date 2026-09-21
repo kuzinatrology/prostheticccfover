@@ -1,7 +1,11 @@
-# Transtibial cover configurator
+# Prosthetic cover configurator
 
-A prototype web configurator for cosmetic covers for a below-knee prosthesis.
-Move the sliders, watch the cover turn, read its weight, download a print file.
+A prototype web configurator for cosmetic covers. Two tabs: **below knee**
+(transtibial, the shape of the leg set by sliders) and **above knee**
+(transfemoral, College Park Capital knee, the shape of the leg taken from a
+scan of the other leg). Move the sliders, watch the cover turn, read its
+weight, download a print file. The transfemoral tab is described in its own
+section below; everything else here applies to both.
 
 The whole point of the build is the last mile: **a design that fails a
 printability check is not reachable**. Every constraint is built into the
@@ -364,9 +368,138 @@ browser does it. Auto-rotation stops on first touch and never starts under
   the colour written as a 3MF base material). It has not been through a slicer
   or a printer.
 
+## The transfemoral tab
+
+`backend/transfemoral/` is a second pipeline beside the first. It shares the
+cell field, the masks, the relief, the prisms, the motif reader and the
+printer profile, and adds what a scan and a knee need. Nothing about the scan
+or the knee reaches the interface: the person choosing sees the design
+controls, a surface smoothing slider and an **Attachment** group.
+
+```bash
+.venv/bin/python -m tools.prepare_scan --render renders/stage_1   # once per scan
+.venv/bin/python -m tools.stage_renders                          # stage renders + numbers
+TF_EXAMPLES=20 .venv/bin/python -m pytest tests/test_transfemoral.py -q
+```
+
+### The scan
+
+`tools/prepare_scan.py` reads `data/оболочка.stl` and writes
+`backend/assets/leg_surface.npz` (radius over angle and height about a
+centreline) and `leg_surface.json` (what each step found). Every step has a
+flag. Mirroring is **off** for this file: it is already the mirrored copy of
+the original scan, confirmed as the prosthetic side.
+
+Front and back: the two indicators the brief names — the direction of the
+largest radius over the calf and the drift of the section centres — agree to
+6.4 degrees, and on this scan both point at the tibial crest, i.e. forward. A
+shin section is long front to back and the crest reaches as far from the axis
+as the calf does. They are used for the front-back line and for the
+20-degree agreement check; which end is the back comes from two independent
+cues that must agree: where the section's mass sits (the calf), and which way
+the scan runs above the knee (the thigh). The blind spot then lands behind the
+knee, as the brief says it should.
+
+The knee axis sits over the last trusted section centre (z = 20), not on the
+tangent carried up past it, which is the calf's forward drift into the knee
+and would put the axis a centimetre in front of the joint.
+
+Curvature is read over a 6 mm baseline: the scan's triangles are 8 mm across
+and read point by point they have a 2 mm radius at every corner, which would
+cap the wall and every hole at nothing.
+
+**Known limitation.** From z ≈ 20 up to `top_z` the scan is the knee bent to
+114 degrees: the kneecap is displaced, the front is stretched, the outline is
+not a straight knee's. It is the most visible part of the cover. The data
+cannot correct it and straightening by rotation is worse. To be revisited with
+a new scan.
+
+### The notch
+
+The cover is rigid and crosses a joint, so behind the knee it leaves free a
+sector with its apex on the flexion axis at least as wide as the flexion. That
+sector (grown by `notch_fillet`) is the notch, **together with** everything the
+thigh stand-in sweeps through from 0 to `flexion_angle`, plus
+`notch_clearance`. The sector alone does not clear the brief's own rotation
+test: a leg-radius cylinder above the knee is wider than the shin in places,
+and turning it sweeps its sides across the shin's side walls just below the
+sector's lower edge. No sector can: it would need to open 106 degrees below
+the horizontal and 88 above.
+
+The thigh's radius is half the knee's width across, at the axis (56 mm), not
+the mean radius at `top_z` (67 mm): that section is the bent knee with the
+thigh and the filled blind spot in it, and a cylinder that size bit the front
+half into a waist.
+
+`notch_split` is 0.35, set from the first renders: at 0.5 the notch ran down
+the calf almost to the ankle and left the back half a thin U.
+
+Notch, seams and rims are fields over the unwrapped surface, in millimetres,
+and they are what the pattern's mask is made of: rims and seams fade the cells
+over 14 mm, the notch over 35 mm. A hole is then kept only if its whole outline
+stays a strut from every edge.
+
+### Halves, magnets, clamps
+
+The seams follow the centreline down each side, passing through the knee
+axis at `seam_offset` = 0, and the back half ends where they run into the
+notch. `seam_offset` stops where the back half would keep less than a quarter
+turn. Every half is a slab: a region of the surface between two offsets along
+its normal, triangulated with interior points a chord apart and refined on the
+surface.
+
+The shelf under each seam is `magnet_diameter + CLEARANCE + 2 MIN_STRUT` wide
+(the brief's width without the fitting gap leaves the strut beside the socket
+short by half of it). The back half thickens inward under each socket; the
+shelf sits deeper by that thickening plus the gap, so the back half slides
+over it. Sockets are cylinders on one surface normal. The shelf breaks where
+a clamp passes and gives way to the tube near the ankle; magnets are spread
+along what is left.
+
+Clamps sit on a line from the ankle's centre to the knee axis (7.5 degrees off
+the scan's axis), at right angles to it. The tube is 30 mm; the module is
+preliminary 60 × 65 mm (**neither is measured**: 65 is scaled off a
+photograph, 60 is a guess), and its hole's defaults carry 2 mm extra. Ring,
+lugs and ribs come from the room at that height and MIN_STRUT; a height where
+they do not fit is not reachable, and the slider's track says so. The lower
+clamp keeps out of the sector. The upper one cannot: it holds the module, and
+the module itself stands in the sector, fixed to the shin, where no thigh ever
+reaches.
+
+### Output
+
+Four bodies: front half (with shelves, sockets and both clamps' front parts),
+back half, and the two clamps' back parts. Download all of them as a zip of
+3MF (or STL) with their masses, or each on its own. The viewer mesh is
+simplified to 0.3 mm, about a tenth of the print mesh's triangles.
+
+### Tests
+
+`tests/test_transfemoral.py` runs `tests/tf_properties.py` over random
+attachment and design settings: every body closed; no vertex of a half in the
+sector; the thigh turned from 0 to the flexion angle touches nothing; walls,
+including behind every socket, at least MIN_STRUT (by rays through the mesh);
+socket pairs on one axis; no body into another, the tube or the module; the
+back parts of the clamps and the bolt heads at least CLEARANCE from the back
+half; holes a strut from each other and from every edge. Counterexamples go
+to `tests/regressions/tf_corpus.jsonl`. Fifteen went in, all fixed: the
+rectangular hole's round corners clipping the module's square ones; shelves
+running into the tube at the ankle; the notch read at two depths when the
+swept thigh is not monotonic through the wall; engraving on a thin wall
+leaving less than MIN_STRUT; a magnet left where its shelf had stopped; the
+back half's thickening meeting the shelf's fused strip under the seam where
+the leg is hollow and normals lean together (hence 1.5 mm of sideways room);
+and two of the probes' own: a ray through a shared mesh edge counted twice,
+and a chord through the corner of a part read as a wall.
+
+The leaves: `back_leaves` swaps the back half's cells for 1–7 large leaves in
+rows down the back midline, one on it or a mirrored pair. The outline is cut,
+midrib and side veins stay as struts, and side veins are added until every
+panel is a hole the wall can carry.
+
 ## Out of scope
 
-No topology optimisation, no FE, no leg scans, no accounts, no database, no
+No topology optimisation, no FE, no accounts, no database, no
 payments, no phone layout. The fields are the seam the first two would come in
 through, and they are deliberately left open.
 

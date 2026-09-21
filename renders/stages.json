@@ -1,0 +1,109 @@
+{
+  "notch": {
+    "knee_axis": [
+      27.2,
+      70.0
+    ],
+    "flexion_angle": 145.0,
+    "notch_split": 0.35,
+    "sector_edges_deg": [
+      -50.8,
+      94.2
+    ],
+    "fillet": 4.0,
+    "thigh_radius": 56.5,
+    "thigh_clearance": 2.0,
+    "seam_meets_notch_z": {
+      "1": 7.0,
+      "-1": 57.0
+    }
+  },
+  "wall": {
+    "wall": 2.4,
+    "max_wall": 4.0,
+    "volumes_mm3": {
+      "front": 242091,
+      "back": 73151,
+      "lower_clamp_back": 2021,
+      "upper_clamp_back": 3366
+    }
+  },
+  "halves": {
+    "holes": 551,
+    "front_holes": 446,
+    "back_holes": 105,
+    "seam_offset_limit": 14.0,
+    "back_half_min_span_deg": 90.0,
+    "seam_solid_floor": 9.7,
+    "notes": [
+      "7 magnets placed of 8"
+    ]
+  },
+  "magnets": {
+    "shelf_width": 7.9,
+    "pad_thickness": 4.96,
+    "shelf_top_depth": 5.26,
+    "shelf_bottom_depth": 10.21,
+    "socket": [
+      6.3,
+      3.3
+    ],
+    "sites_z": {
+      "1": [
+        -205.7,
+        -128.3,
+        -44.2
+      ],
+      "-1": [
+        -283.0,
+        -192.0,
+        -101.0,
+        -10.0
+      ]
+    }
+  },
+  "clamps": {
+    "lower": {
+      "z": -225.0,
+      "range": [
+        -234.0,
+        -201.0
+      ],
+      "ring": 3.45,
+      "ribs": 2,
+      "rib_width": 5.0,
+      "height": 10.0,
+      "bolt_x": 19.54
+    },
+    "upper": {
+      "z": -60.0,
+      "range": [
+        -66.0,
+        70.0
+      ],
+      "ring": 2.4,
+      "ribs": 3,
+      "rib_width": 5.0,
+      "height": 10.0,
+      "bolt_x": 35.54
+    }
+  },
+  "pylon_tilt_deg": 6.1,
+  "module_bottom_z": -85.1,
+  "output": {
+    "masses_g": {
+      "front": 212.7,
+      "back": 72.1,
+      "lower_clamp_back": 2.6,
+      "upper_clamp_back": 4.3
+    },
+    "total_g": 291.7,
+    "plain_g": 416.8,
+    "triangles": {
+      "front": 232384,
+      "back": 65034,
+      "lower_clamp_back": 1580,
+      "upper_clamp_back": 988
+    }
+  }
+}

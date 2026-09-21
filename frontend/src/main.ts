@@ -17,11 +17,68 @@ import {
   type Schema,
   type Silhouette,
 } from "./api";
-import { Panel } from "./panel";
+import { Panel, TRANSFEMORAL, TRANSTIBIAL, type PanelLayout } from "./panel";
 import { has, strings } from "./strings.en";
 import { Viewer } from "./viewer";
 
 const DEBOUNCE_MS = 250;
+
+/**
+ * Two covers, one tab each. They share every control they have in common and
+ * the whole of this file; what differs is where the service lives, which
+ * groups the panel shows and what the masthead says.
+ */
+interface Mode {
+  key: "transtibial" | "transfemoral";
+  base: string;
+  layout: PanelLayout;
+  title: string;
+  subtitle: string;
+  specKeys: Record<string, string>;
+}
+
+const MODES: Mode[] = [
+  {
+    key: "transtibial",
+    base: "/api",
+    layout: TRANSTIBIAL,
+    title: strings.masthead.title,
+    subtitle: strings.masthead.subtitle,
+    specKeys: strings.masthead.specKeys,
+  },
+  {
+    key: "transfemoral",
+    base: "/api/tf",
+    layout: TRANSFEMORAL,
+    title: strings.transfemoral.masthead.title,
+    subtitle: strings.transfemoral.masthead.subtitle,
+    specKeys: strings.transfemoral.specKeys,
+  },
+];
+
+const mode: Mode = MODES.find((m) => `#${m.key}` === location.hash) ?? MODES[0];
+
+/** The tab strip. A tab is a link: each cover starts fresh in its own page. */
+function buildTabs(): void {
+  const nav = document.getElementById("tabs");
+  if (!nav) return;
+  for (const m of MODES) {
+    const label = strings.tabs[m.key];
+    if (!has(label)) continue;
+    const link = document.createElement("a");
+    link.className = m.key === mode.key ? "tab tab-on" : "tab";
+    link.href = `#${m.key}`;
+    link.textContent = label;
+    if (m.key === mode.key) link.setAttribute("aria-current", "page");
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (m.key === mode.key) return;
+      location.hash = m.key;
+      location.reload();
+    });
+    nav.append(link);
+  }
+}
 
 const stage = document.getElementById("stage") as HTMLCanvasElement;
 const masthead = document.getElementById("masthead") as HTMLElement;
@@ -32,6 +89,7 @@ let params: Params;
 let panel: Panel;
 let viewer: Viewer;
 let specLine: HTMLElement | null = null;
+let explodeMm = 70;
 
 let timer: number | undefined;
 let inflight: AbortController | null = null;
@@ -77,7 +135,8 @@ function refreshPanel(): void {
 }
 
 function buildMasthead(): void {
-  const { title, subtitle, specLabel } = strings.masthead;
+  const { title, subtitle } = mode;
+  const { specLabel } = strings.masthead;
   if (has(title)) {
     const node = document.createElement("h1");
     node.className = "masthead-title";
@@ -90,9 +149,7 @@ function buildMasthead(): void {
     node.textContent = subtitle;
     masthead.append(node);
   }
-  const keys = Object.keys(strings.masthead.specKeys).filter((k) =>
-    has(strings.masthead.specKeys[k]),
-  );
+  const keys = Object.keys(mode.specKeys).filter((k) => has(mode.specKeys[k]));
   if (keys.length === 0) return;
   const line = document.createElement("p");
   line.className = "masthead-spec";
@@ -109,7 +166,8 @@ function buildMasthead(): void {
 
 function updateSpec(): void {
   if (!specLine) return;
-  const { specKeys, specSeparator } = strings.masthead;
+  const { specSeparator } = strings.masthead;
+  const specKeys = mode.specKeys;
   const parts: string[] = [];
   for (const [key, letter] of Object.entries(specKeys)) {
     if (!has(letter)) continue;
@@ -181,12 +239,16 @@ async function run(draft: boolean): Promise<void> {
   pending = true;
   panel.setBusy(true, draft ? strings.status.draft : strings.status.computing);
   try {
-    const { glb, stats } = await fetchCover(params, draft, controller.signal);
+    const { glb, stats } = await fetchCover(params, draft, controller.signal, mode.base);
     await viewer.setModel(glb);
     viewer.setFinish(stats.finish);
     panel.setStats(stats);
     panel.setCap("wall_thickness", stats.max_wall_thickness);
     panel.setCap("relief_depth", stats.max_relief_depth);
+    for (const [key, [lo, hi]] of Object.entries(stats.limits ?? {})) {
+      panel.setLimits(key, lo, hi);
+    }
+    if (stats.explode_mm !== undefined) explodeMm = stats.explode_mm;
     applyAccent(stats.finish.colour_a);
     pending = false;
     panel.setBusy(false, "");
@@ -198,7 +260,9 @@ async function run(draft: boolean): Promise<void> {
 }
 
 async function start(): Promise<void> {
-  schema = await fetchSchema();
+  buildTabs();
+  document.title = mode.title;
+  schema = await fetchSchema(mode.base);
   params = { ...schema.defaults };
 
   const first =
@@ -248,14 +312,24 @@ async function start(): Promise<void> {
     async onDownload(fmt) {
       panel.setDownloading(true);
       try {
-        await downloadCover(params, fmt);
+        await downloadCover(params, fmt, mode.base);
       } catch {
         panel.setBusy(pending, strings.status.offline);
       } finally {
         panel.setDownloading(false);
       }
     },
-  });
+    async onDownloadBody(body) {
+      try {
+        await downloadCover(params, "3mf", mode.base, body);
+      } catch {
+        panel.setBusy(pending, strings.status.offline);
+      }
+    },
+    onExplode(apart) {
+      viewer.setExploded(apart, explodeMm);
+    },
+  }, mode.layout);
   panel.setSilhouette(null, "");
   refreshPanel();
   void run(false);

@@ -1,0 +1,151 @@
+{
+  "scan": "оболочка.stl",
+  "knee_module": "College Park Capital",
+  "known_limitation": "z from ~20 to top_z is the knee scanned bent to 114 degrees: the kneecap is displaced, the front is stretched and the outline differs from a straight knee. This is the most visible part of the cover. It cannot be fixed from this data and straightening by rotation is worse. Known discrepancy; revisit with a new scan.",
+  "scan_knee_flexion_deg": 114.0,
+  "input": {
+    "faces": 5252,
+    "vertices": 3046,
+    "bodies": 1,
+    "winding_consistent": true
+  },
+  "units": {
+    "detected": "mm",
+    "scale_to_mm": 1.0,
+    "length_along_axis": 520.6
+  },
+  "align": {
+    "centroid": [
+      88.45,
+      -199.562,
+      -491.467
+    ],
+    "main_axis": [
+      0.3325,
+      0.9414,
+      0.0574
+    ],
+    "z_range": [
+      -311.7,
+      208.8
+    ]
+  },
+  "orient": {
+    "calf_max_radius_deg": -137.4,
+    "centre_drift_deg": -131.0,
+    "disagreement_deg": 6.4,
+    "back_by_section_mass_mm": -1.07,
+    "back_by_thigh_mm": -27.6,
+    "indicators_point": "front",
+    "back_deg": 45.8,
+    "rotated_about_z_deg": -135.8
+  },
+  "mirror": {
+    "applied": false,
+    "why": "file is already the mirrored copy"
+  },
+  "axis": {
+    "sections": 64,
+    "trusted_below_z": 20.0,
+    "tangent_fitted_over": [
+      -60.0,
+      20.0
+    ],
+    "tangent_dxdz_dydz": [
+      0.0737,
+      0.1942
+    ],
+    "drift_from_straight_axis_mm": 7.0,
+    "drift_from_z_axis_mm": 27.9,
+    "mean_section_radius_mm": 49.0,
+    "residual_to_fit_mm": 1.79
+  },
+  "top": {
+    "top_z": 105.0,
+    "knee_axis_z": 70.0,
+    "faces_before": 5252,
+    "faces_after": 4074
+  },
+  "thigh": {
+    "radius_factor": 1.5,
+    "vertices_beyond_radius": 413,
+    "faces_removed_by_radius": 476,
+    "components_removed": 39,
+    "faces_in_removed_components": 39
+  },
+  "decimate": {
+    "faces": 3559,
+    "target": 60000,
+    "applied": false
+  },
+  "sample": {
+    "grid": [
+      205,
+      360
+    ],
+    "dz_mm": 2.0,
+    "bottom_z": -303.0,
+    "ray_hits_pct_by_z": {
+      "60": 100.0,
+      "70": 100.0,
+      "75": 95.3,
+      "80": 92.2,
+      "90": 88.9,
+      "100": 86.9,
+      "104": 86.4
+    },
+    "kept_after_thigh_pct_by_z": {
+      "60": 100.0,
+      "70": 85.8,
+      "75": 82.2,
+      "80": 80.8,
+      "90": 78.9,
+      "100": 73.6,
+      "104": 53.1
+    },
+    "full_coverage_up_to_z": 62.0,
+    "star_probes": 145160,
+    "star_problems": 0
+  },
+  "fill": {
+    "rows_with_gaps": 22,
+    "widest_gap_deg": 83.0,
+    "widest_gap_outside_notch_deg": 10.0,
+    "unknown_share_pct": 2.3
+  },
+  "smoothing": {
+    "strength_0.5": {
+      "max_radial_shift_mm": 0.5,
+      "max_normal_shift_mm": 0.44,
+      "limit_mm": 0.5,
+      "ok": true
+    },
+    "strength_1": {
+      "max_radial_shift_mm": 0.5,
+      "max_normal_shift_mm": 0.468,
+      "limit_mm": 0.5,
+      "ok": true
+    }
+  },
+  "knee": {
+    "axis_y": 27.21,
+    "axis_z": 70.0,
+    "top_z": 105.0,
+    "flexion_angle": 145.0,
+    "notch_split": 0.35,
+    "section_at_axis_front_back_mm": 152.9,
+    "section_at_axis_across_mm": 112.8,
+    "back_behind_axis_mm": 77.3,
+    "notch_height_range_on_back": [
+      -24.6,
+      "above the top"
+    ]
+  },
+  "output": {
+    "surface": "backend/assets/leg_surface.npz",
+    "bottom_z": -303.0,
+    "top_z": 105.0,
+    "knee_axis_y": 27.208741419720944,
+    "mirrored": false
+  }
+}

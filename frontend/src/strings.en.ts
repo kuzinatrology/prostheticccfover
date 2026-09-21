@@ -29,6 +29,37 @@ export const strings = {
     heading: "Start from",
   },
 
+  /** The two covers, one tab each. */
+  tabs: {
+    transtibial: "Below knee",
+    transfemoral: "Above knee",
+  } as Record<string, string>,
+
+  /** The transfemoral tab's own words. Everything else is shared. */
+  transfemoral: {
+    masthead: {
+      title: "Transfemoral cover",
+      subtitle: "Capital knee · cosmetic shell, printed to order",
+    },
+    specKeys: {
+      wall_thickness: "W",
+      pattern_density: "D",
+      irregularity: "I",
+      anisotropy: "X",
+      strut_width: "S",
+      magnet_count: "M",
+    } as Record<string, string>,
+    bodies: {
+      heading: "Parts",
+      front: "Front half",
+      back: "Back half",
+      lower_clamp_back: "Lower clamp, back",
+      upper_clamp_back: "Upper clamp, back",
+    } as Record<string, string>,
+    explode: "Pull the parts apart",
+    downloadBody: "3MF",
+  },
+
   groups: {
     limb: "Limb",
     section: "Section",
@@ -37,6 +68,8 @@ export const strings = {
     relief: "Relief",
     mask: "Where",
     finish: "Finish",
+    mount: "Attachment",
+    leaves: "Leaves on the back",
   },
 
   params: {
@@ -70,6 +103,21 @@ export const strings = {
     mask_u_width: "Width",
     mask_feather: "Softness",
     facet_scale: "Facet size",
+    surface_smoothing: "Surface smoothing",
+    seam_offset: "Seam back",
+    seam_solid_width: "Plain band at seam",
+    magnet_diameter: "Magnet diameter",
+    magnet_height: "Magnet height",
+    magnet_count: "Magnets per seam",
+    lower_clamp_z: "Lower clamp height",
+    upper_clamp_z: "Upper clamp height",
+    lower_hole_diameter: "Tube hole",
+    upper_hole_width: "Module hole, across",
+    upper_hole_depth: "Module hole, front to back",
+    bolt_diameter: "Bolt hole",
+    leaf_count: "Leaves",
+    leaf_size: "Leaf length",
+    leaf_tilt: "Leaf lean",
   } as Record<string, string>,
 
   /** Labels that change meaning when the hole is a picture rather than a cell.
@@ -135,6 +183,7 @@ export const strings = {
     split_halves: "Split in halves",
     motif_align_flow: "Turn with the lean",
     motif_invert: "Cut the negative",
+    back_leaves: "Large leaves instead of cells",
   } as Record<string, string>,
 
   motif: {
