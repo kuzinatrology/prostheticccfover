@@ -23,7 +23,7 @@ from functools import lru_cache
 
 import numpy as np
 from scipy.interpolate import PchipInterpolator, RectBivariateSpline
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, maximum_filter1d
 
 from ..surface import TWO_PI, SurfaceBase
 from . import config as cfg
@@ -61,6 +61,50 @@ def smooth_radius(
     if worst > cfg.SMOOTH_MAX_SHIFT:
         delta *= cfg.SMOOTH_MAX_SHIFT / worst
     return R + delta, float(np.abs(delta).max())
+
+
+def even_out_knee(R: np.ndarray, z: np.ndarray, dz: float) -> tuple[np.ndarray, float]:
+    """Take the scan's shadows off the knee, where they are not the leg.
+
+    Above KNEE_EVEN_FROM_Z the rays that built this grid started missing and
+    the holes they left were filled: what comes out is a knee with steps of
+    several millimetres between rows two apart, which shows as a wavy top rim
+    and a rippled surface over the whole upper third.
+
+    It is evened by building the surface **out** to a smooth envelope over it,
+    never by shaving it back. Both would give a smooth rim; only this one is
+    safe. The cover's outer skin is this surface and its wall goes inward, so
+    every millimetre shaved off here is a millimetre off the room left for the
+    knee module inside, and that clearance is already thin. Filling can only
+    add room. The price is a knee up to KNEE_EVEN_MAX_SHIFT fuller, which on
+    this scan averages under a millimetre.
+
+    Returns the evened grid and the largest shift it applied.
+    """
+    t = np.clip((z - cfg.KNEE_EVEN_FROM_Z) / cfg.KNEE_EVEN_RAMP, 0.0, 1.0)
+    w = (t * t * (3.0 - 2.0 * t))[:, None]
+    if not (w > 0).any():
+        return R.copy(), 0.0
+    cols = R.shape[1]
+    d_theta = TWO_PI / cols
+
+    def ring_window(j: float) -> float:
+        """The ring smoothing, in columns rather than millimetres."""
+        return cfg.KNEE_EVEN_SIGMA_RING / max(float(j) * d_theta, 1e-6)
+
+    # Dilate first, then smooth: the dilation lifts every dent to its
+    # surroundings and the smoothing rounds what is left, so the result sits
+    # on the outside of the scan rather than through the middle of it.
+    env = maximum_filter1d(R, size=int(round(cfg.KNEE_EVEN_SIGMA / dz)) | 1, axis=0, mode="nearest")
+    for j in range(R.shape[0]):
+        size = max(int(round(ring_window(R[j].mean()))) | 1, 1)
+        env[j] = maximum_filter1d(env[j], size=size, mode="wrap")
+    env = gaussian_filter1d(env, cfg.KNEE_EVEN_SIGMA / dz, axis=0, mode="nearest")
+    for j in range(R.shape[0]):
+        env[j] = gaussian_filter1d(env[j], ring_window(R[j].mean()), mode="wrap")
+
+    delta = np.clip((env - R) * w, 0.0, cfg.KNEE_EVEN_MAX_SHIFT)
+    return R + delta, float(delta.max())
 
 
 @dataclass(frozen=True)
@@ -105,7 +149,10 @@ class ScanSurface(SurfaceBase):
         self.z1 = float(data.z[-1])
         self.length = self.z1 - self.z0
         dz = float(data.z[1] - data.z[0])
-        self.R, self.smoothing_shift = smooth_radius(data.R, dz, smoothing)
+        # The knee is evened out first and whatever the slider says: the steps
+        # up there are the scan's shadows, not texture the slider is about.
+        evened, self.knee_shift = even_out_knee(data.R, data.z, dz)
+        self.R, self.smoothing_shift = smooth_radius(evened, dz, smoothing)
 
         cols = len(data.theta)
         th = np.concatenate(

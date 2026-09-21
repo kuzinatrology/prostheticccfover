@@ -262,9 +262,7 @@ class Layout:
         # millimetres below the other; taken side by side, the back half keeps
         # a tail between the two heights that narrows from a quarter of the
         # turn to nothing — a fin that prints badly, snaps easily and reads as
-        # a mistake. Ending both seams together squares the back half off, and
-        # setting `emerge` there hands the front half everything above it, so
-        # the cover loses no cover: what was the fin is now part of the front.
+        # a mistake. Ending both seams together squares the back half off.
         first = min(side.meet for side in out.sides.values())
         out.sides = {s: replace(side, meet=first) for s, side in out.sides.items()}
         return out

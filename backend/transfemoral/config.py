@@ -68,6 +68,34 @@ coarse mesh off it."""
 SMOOTH_SIGMA_MAX = 6.0
 """Gaussian width, mm, at the top of the smoothing slider."""
 
+KNEE_EVEN_FROM_Z = 40.0
+"""Height the scan stops being a measurement of the leg.
+
+Above it a third of the probe rays miss: the knee is bent, the thigh shadows
+the back of it and the gaps are filled in. Neighbouring rows two millimetres
+apart then differ by up to eight, which is the scan giving up rather than the
+shape of a knee. It shows as a wavy top rim and a rippled upper surface."""
+
+KNEE_EVEN_SIGMA = 9.0
+"""Gaussian width, mm, along the height over that region."""
+
+KNEE_EVEN_SIGMA_RING = 4.0
+"""The same around the section, as arc length."""
+
+KNEE_EVEN_RAMP = 25.0
+"""Height, mm, the correction fades in over above KNEE_EVEN_FROM_Z, so the
+shin below is untouched and no crease is left where the two meet. Full
+strength from z = 65, which is where the shadows start."""
+
+KNEE_EVEN_MAX_SHIFT = 6.0
+"""How far evening out may build the surface out up there, mm.
+
+It only ever adds: the wall goes inward from this surface and the knee module
+is inside, so shaving a spike back would spend clearance that is already thin,
+while filling a dent cannot. That asymmetry is why this is twelve times
+SMOOTH_MAX_SHIFT and still safe. On this scan it adds 0.8 mm on average over
+the evened region; the cap binds on a handful of samples."""
+
 CURVATURE_BASELINE = 6.0
 """Arc length, mm, the surface's curvature is read over. The scan's triangles
 are eight millimetres across and their corners are kinks; a wall a few

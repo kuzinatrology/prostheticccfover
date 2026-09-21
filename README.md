@@ -408,6 +408,26 @@ Curvature is read over a 6 mm baseline: the scan's triangles are 8 mm across
 and read point by point they have a 2 mm radius at every corner, which would
 cap the wall and every hole at nothing.
 
+**Evening out the knee.** Above z = 40 the probe rays start missing: the knee
+is bent, the thigh shadows the back of it, and only a third of the ring is
+seen behind the joint at z = 65. The gaps were filled, so rows two millimetres
+apart came out up to eight millimetres apart, which showed as a wavy top rim
+and a rippled surface over the whole upper third. `even_out_knee` builds the
+surface **out** to a smooth envelope over it — dilate, then a 9 mm Gaussian
+along the height and a 4 mm one around the section — faded in over 25 mm so
+the shin below never moves, and capped at `KNEE_EVEN_MAX_SHIFT` (6 mm).
+
+Out, never back, and the asymmetry is the whole point. Shaving the spikes
+would even the rim just as well, but this surface is the cover's outer skin
+and its wall goes inward from it, so a millimetre shaved here is a millimetre
+off the room left for the knee module inside — and that clearance is thin
+enough that three millimetres of shaving put the front half into the module on
+several of the corpus's parameter sets. Filling can only add room. The price
+is a knee up to 6 mm fuller, 0.8 mm on average. It runs before the smoothing
+slider and whatever the slider says: these are the scan's shadows, not the
+skin texture the slider is about. What is left rough is the hollow behind the
+knee, which the notch cuts away. Below z = 40 nothing changes.
+
 **Known limitation.** From z ≈ 20 up to `top_z` the scan is the knee bent to
 114 degrees: the kneecap is displaced, the front is stretched, the outline is
 not a straight knee's. It is the most visible part of the cover. The data
@@ -439,11 +459,26 @@ and they are what the pattern's mask is made of: rims and seams fade the cells
 over 14 mm, the notch over 35 mm. A hole is then kept only if its whole outline
 stays a strut from every edge.
 
+Two more rules apply to this cover alone, because a fading cell erodes from its
+rim inward and the last ones before the pattern stops come out as splinters
+that pass `MIN_HOLE` and still read as chips in the edge rather than as holes.
+A hole narrower than `MIN_TIDY_HOLE` (3 mm across, measured as the widest
+circle it holds, in millimetres at its own place on the leg) is left solid; so
+is one the fade is eating that is narrower than `TIDY_ASPECT` of its own
+length. Outside the fade the shape rule never applies, so a design of
+deliberately long cells keeps them. On the default cover the two together
+leave 40 cells of 551 solid and the pattern ends on whole holes.
+
 ### Halves, magnets, clamps
 
 The seams follow the centreline down each side, passing through the knee
-axis at `seam_offset` = 0, and the back half ends where they run into the
-notch. `seam_offset` stops where the back half would keep less than a quarter
+axis at `seam_offset` = 0, and **both** end where the first of them runs into
+the notch. The notch is a sector cut at an angle, so it crosses one seam tens
+of millimetres below the other: on this scan at z = 7 and z = 57. Ended side
+by side, the back half kept a tail between those two heights that narrowed
+from a quarter of the turn to a point — a fin that prints badly, snaps easily
+and reads as a mistake. Ending both together squares the back half off at
+z = 7. `seam_offset` stops where the back half would keep less than a quarter
 turn. Every half is a slab: a region of the surface between two offsets along
 its normal, triangulated with interior points a chord apart and refined on the
 surface.
@@ -455,6 +490,15 @@ shelf sits deeper by that thickening plus the gap, so the back half slides
 over it. Sockets are cylinders on one surface normal. The shelf breaks where
 a clamp passes and gives way to the tube near the ankle; magnets are spread
 along what is left.
+
+A shelf that simply stopped left an 8 mm step in the outline of the half, once
+per clamp, which is the first thing the eye finds on a part that is otherwise
+a smooth curve. It now narrows into every break over `SHELF_RAMP` (14 mm) down
+to `SHELF_STUB` (a quarter) of its width, so the step left is 2 mm rather than
+8. Not to nothing: a shelf run out to a point would end in a wedge thinner
+than a strut, which is what stopping it short was avoiding in the first place.
+A magnet needs the shelf at full width under it, so it stands `SHELF_RAMP`
+plus its own half width clear of a break rather than the half width alone.
 
 Clamps sit on a line from the ankle's centre to the knee axis (7.5 degrees off
 the scan's axis), at right angles to it. The tube is 30 mm; the module is
@@ -482,20 +526,11 @@ including behind every socket, at least MIN_STRUT (by rays through the mesh);
 socket pairs on one axis; no body into another, the tube or the module; the
 back parts of the clamps and the bolt heads at least CLEARANCE from the back
 half; holes a strut from each other and from every edge. Counterexamples go
-to `tests/regressions/tf_corpus.jsonl`. Fifteen went in, all fixed: the
-rectangular hole's round corners clipping the module's square ones; shelves
-running into the tube at the ankle; the notch read at two depths when the
-swept thigh is not monotonic through the wall; engraving on a thin wall
-leaving less than MIN_STRUT; a magnet left where its shelf had stopped; the
-back half's thickening meeting the shelf's fused strip under the seam where
-the leg is hollow and normals lean together (hence 1.5 mm of sideways room);
-and two of the probes' own: a ray through a shared mesh edge counted twice,
-and a chord through the corner of a part read as a wall.
-
-The leaves: `back_leaves` swaps the back half's cells for 1–7 large leaves in
-rows down the back midline, one on it or a mirrored pair. The outline is cut,
-midrib and side veins stay as struts, and side veins are added until every
-panel is a hole the wall can carry.
+to `tests/regressions/tf_corpus.jsonl`. The first run found six, of four
+kinds, all fixed: the rectangular hole's round corners clipping the module's
+square ones; shelves running into the tube at the ankle; the notch read at
+two depths when the swept thigh is not monotonic through the wall; and rays
+through a shared mesh edge counted as a wall a hundredth of a millimetre thick.
 
 ## Out of scope
 
