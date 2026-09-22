@@ -29,10 +29,13 @@ export const strings = {
     heading: "Start from",
   },
 
-  /** The two covers, one tab each. */
+  /** The covers, one tab each. */
   tabs: {
     transtibial: "Below knee",
     transfemoral: "Above knee",
+    anatomic: "Anatomic shank",
+    iter1: "Iteration 1",
+    iter2: "Iteration 2",
   } as Record<string, string>,
 
   /** The transfemoral tab's own words. Everything else is shared. */
@@ -60,6 +63,93 @@ export const strings = {
     downloadBody: "3MF",
   },
 
+  /**
+   * The anatomic tab's own words. This cover is not drawn by sliders: its
+   * shape is measured off a scan of the prosthesis and off a human shank, so
+   * the controls are tolerances and the shape of the rim, and the readout
+   * that matters is how far the knee still bends.
+   */
+  anatomic: {
+    masthead: {
+      title: "Anatomic shank cover",
+      subtitle: "Shaped from the prosthesis scan and a MakeHuman shank",
+    },
+    specKeys: {
+      clearance: "C",
+      wall_thickness: "W",
+      knee_cover: "K",
+      pattern_density: "D",
+      irregularity: "I",
+      strut_width: "S",
+    } as Record<string, string>,
+    flexionLabel: "Bends to",
+    gapLabel: "Gap",
+    jammed: "jams",
+  },
+
+  /** The reference tab: the same cover with its rim and silhouette traced. */
+  reference: {
+    masthead: {
+      title: "Cover from the reference",
+      subtitle: "Rim and silhouette traced off the two renders",
+    },
+    specKeys: {
+      clearance: "C",
+      wall_thickness: "W",
+      seat_z: "Z",
+      pattern_density: "D",
+      strut_width: "S",
+    } as Record<string, string>,
+  },
+
+  /**
+   * The modelled tab's own words. This cover is the other way round from the
+   * rest: its shape is a file someone drew, so there is nothing here that
+   * shapes it. What the sliders do is give that shape a wall and a pattern.
+   */
+  iter1: {
+    masthead: {
+      title: "Modelled cover",
+      subtitle: "cover ready iteration 1 \u00b7 wall and pattern on the Rhino model",
+    },
+    specKeys: {
+      fullness: "F",
+      wall_thickness: "W",
+      pattern_density: "D",
+      irregularity: "I",
+      anisotropy: "X",
+      strut_width: "S",
+      rim_solid: "R",
+    } as Record<string, string>,
+    wallLabel: "Wall",
+    modelLabel: "Model",
+  },
+
+  /**
+   * The second modelled tab. The same kind of object as the first -- a Rhino
+   * file with a wall and a pattern on it -- with the attachment the first one
+   * has not: a seam with magnets and two clamps on the pylon. So it ships four
+   * bodies rather than one, and the loose ones can be pulled off the cover in
+   * the viewer.
+   */
+  iter2: {
+    masthead: {
+      title: "Modelled cover, fastened",
+      subtitle: "Cover new \u00b7 split in halves, magnets on the seam, clamps on the pylon",
+    },
+    specKeys: {
+      fullness: "F",
+      wall_thickness: "W",
+      pattern_density: "D",
+      strut_width: "S",
+      magnet_count: "M",
+      clamp_count: "C",
+      bolt_diameter: "B",
+    } as Record<string, string>,
+    wallLabel: "Wall",
+    modelLabel: "Model",
+  },
+
   groups: {
     limb: "Limb",
     section: "Section",
@@ -68,6 +158,10 @@ export const strings = {
     relief: "Relief",
     mask: "Where",
     finish: "Finish",
+    fit: "Fit",
+    seat: "How it sits",
+    silhouette: "Silhouette",
+    rim: "Rim and notch",
     mount: "Attachment",
     leaves: "Leaves on the back",
   },
@@ -83,6 +177,20 @@ export const strings = {
     section_squareness: "Squareness",
     twist: "Twist",
     wall_thickness: "Wall",
+    rim_solid: "Plain band at the rim",
+    clearance: "Clearance",
+    fullness: "Calf fullness",
+    top_z: "Top of the rim",
+    bottom_clearance: "Above the ankle",
+    front_dip: "Front dip",
+    notch_depth: "Back notch",
+    seat_z: "Top of the cover",
+    knee_cover: "Over the knee",
+    flexion: "Must bend to",
+    notch_deepen: "Notch deeper",
+    height_scale: "Height",
+    top_trim: "Rim lowered",
+    bottom_trim: "Bottom raised",
     pattern_density: "Density",
     density_gradient: "Gradient",
     irregularity: "Irregularity",
@@ -115,6 +223,7 @@ export const strings = {
     upper_hole_width: "Module hole, across",
     upper_hole_depth: "Module hole, front to back",
     bolt_diameter: "Bolt hole",
+    clamp_count: "Clamps",
     leaf_count: "Leaves",
     leaf_size: "Leaf length",
     leaf_tilt: "Leaf lean",
@@ -166,6 +275,13 @@ export const strings = {
         band: "In a band",
         panel: "On a panel",
         stripes: "In stripes",
+      } as Record<string, string>,
+    },
+    nut_kind: {
+      label: "Bolt anchors",
+      options: {
+        heat_set: "Heat-set inserts",
+        hex: "Captive nuts",
       } as Record<string, string>,
     },
     finish: {

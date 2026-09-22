@@ -145,6 +145,80 @@ export const TF_GROUPS: Group[] = [
   },
 ];
 
+/**
+ * The anatomic tab. Nothing here draws the leg: the shape comes from the scan
+ * and from the MakeHuman shank, so what is left to decide is how much room the
+ * prosthesis gets, how full the calf reads, and where the rim runs.
+ */
+export const ANAT_GROUPS: Group[] = [
+  { key: "fit", params: ["clearance", "wall_thickness"] },
+  { key: "silhouette", params: ["fullness", "knee_cover", "bottom_clearance", "flexion"] },
+  // The four axes, unchanged: the cover is a different shape, not a
+  // different kind of object, so pattern, relief, mask and finish are the
+  // same rows they are on the other two tabs.
+  ...GROUPS.slice(3, 7),
+  {
+    key: "finish",
+    choices: ["finish"],
+    params: ["facet_scale"],
+    toggles: ["split_halves"],
+    block: "materials",
+  },
+  {
+    key: "leaves",
+    toggles: ["back_leaves"],
+    params: ["leaf_count", "leaf_size", "leaf_tilt"],
+    when: CUTS,
+  },
+];
+
+/**
+ * The modelled tab. Nothing here draws the cover from nothing: the shape is
+ * the Rhino file. What the silhouette and rim groups do is wear it
+ * differently — fuller, squarer, turned, shorter, cut back at a rim — and
+ * every one of those is a transformation of the measured model, so no slider
+ * can invent a shape the file does not have. The design groups are the same
+ * ones every cover has.
+ */
+export const ITER_GROUPS: Group[] = [
+  { key: "silhouette", params: ["fullness", "ovality", "posterior_bias", "twist", "height_scale"] },
+  { key: "rim", params: ["top_trim", "bottom_trim", "notch_deepen"] },
+  { key: "shell", params: ["wall_thickness", "surface_smoothing", "rim_solid"] },
+  ...GROUPS.slice(3, 7),
+  {
+    key: "finish",
+    choices: ["finish"],
+    params: ["facet_scale"],
+    block: "materials",
+  },
+];
+
+/**
+ * The second modelled tab: the first tab's groups, plus the attachment.
+ *
+ * The attachment rows are the transfemoral tab's where they mean the same
+ * thing. What is gone is every row about the hardware's own size -- the tube
+ * and the module used to be typed in because nobody had measured them, and
+ * they are measured now, off the prosthesis scan. What is new is which anchor
+ * the bolts thread into, because they no longer thread into the plastic.
+ */
+export const ITER2_GROUPS: Group[] = [
+  ...ITER_GROUPS,
+  {
+    key: "mount",
+    choices: ["nut_kind"],
+    params: [
+      "magnet_count",
+      "magnet_diameter",
+      "magnet_height",
+      "clamp_count",
+      "lower_clamp_z",
+      "upper_clamp_z",
+      "bolt_diameter",
+    ],
+  },
+];
+
 export interface PanelLayout {
   groups: Group[];
   rowWhen: Record<string, (p: Params) => boolean>;
@@ -154,6 +228,40 @@ export interface PanelLayout {
 
 export const TRANSTIBIAL: PanelLayout = { groups: GROUPS, rowWhen: ROW_WHEN, bodies: false };
 const LEAVES = (p: Params) => p.operation === "cut" && Boolean(p.back_leaves);
+
+/**
+ * The reference tab. The rim and the silhouette are traced off the renders,
+ * so the two sliders that shaped them are gone; what is left is where the
+ * cover sits on the leg, and a handle to take the traced notch deeper if the
+ * knee still needs room.
+ */
+export const REF_GROUPS: Group[] = [
+  { key: "fit", params: ["clearance", "wall_thickness"] },
+  { key: "seat", params: ["seat_z", "bottom_clearance", "fullness", "notch_deepen", "flexion"] },
+  ...ANAT_GROUPS.slice(3),
+];
+
+const ANAT_LEAVES = (p: Params) => p.operation === "cut" && Boolean(p.back_leaves);
+
+export const REFERENCE: PanelLayout = {
+  groups: REF_GROUPS,
+  rowWhen: { ...ROW_WHEN, leaf_count: ANAT_LEAVES, leaf_size: ANAT_LEAVES, leaf_tilt: ANAT_LEAVES },
+  bodies: false,
+};
+
+export const ANATOMIC: PanelLayout = {
+  groups: ANAT_GROUPS,
+  rowWhen: { ...ROW_WHEN, leaf_count: ANAT_LEAVES, leaf_size: ANAT_LEAVES, leaf_tilt: ANAT_LEAVES },
+  bodies: false,
+};
+
+export const ITERATION1: PanelLayout = { groups: ITER_GROUPS, rowWhen: ROW_WHEN, bodies: false };
+
+export const ITERATION2: PanelLayout = {
+  groups: ITER2_GROUPS,
+  rowWhen: ROW_WHEN,
+  bodies: true,
+};
 
 export const TRANSFEMORAL: PanelLayout = {
   groups: TF_GROUPS,
@@ -259,6 +367,8 @@ export class Panel {
 
   private presetStrip(): HTMLElement {
     const box = tag("div", "presets");
+    // A tab with no presets gets no heading either, rather than an empty one.
+    if (this.schema.presets.length === 0) return box;
     if (has(strings.presets.heading)) {
       box.append(tag("p", "group group-first", strings.presets.heading));
     }

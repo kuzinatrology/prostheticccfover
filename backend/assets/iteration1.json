@@ -1,0 +1,33 @@
+{
+  "source": "cover ready iteration 1.stl",
+  "faces": 30134,
+  "samples": 3000000,
+  "wall_mm": 4.94,
+  "wall_radial_median_mm": 5.07,
+  "wall_radial_p5_mm": 4.99,
+  "wall_radial_p95_mm": 5.38,
+  "lean_factor": 0.9729,
+  "height_mm": 461.7,
+  "bottom_rim_mm": [
+    -4.5,
+    -3.9
+  ],
+  "top_rim_mm": [
+    323.1,
+    457.2
+  ],
+  "radius_mm": [
+    25.3,
+    76.1
+  ],
+  "coverage": 0.915,
+  "shift_mm": [
+    -971.82,
+    -171.07,
+    -4.51
+  ],
+  "grid": [
+    463,
+    360
+  ]
+}

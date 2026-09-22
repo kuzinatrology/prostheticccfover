@@ -794,3 +794,9 @@ body {
     transition: none;
   }
 }
+
+/* The anatomic tab says when the knee jams; that is not a note, it is the
+   headline, so it reads in the accent-warning colour. */
+.masthead-spec-warn {
+  color: #b4462f;
+}

@@ -32,7 +32,7 @@ from .fields import Field, Fields
 from .params import RANGES, CoverParams
 from .pattern import CellField, Placement, build_cells, build_pattern
 from .printer_profile import DEFAULT_PROFILE, PrinterProfile
-from .surface import Surface
+from .surface import Surface, SurfaceBase
 
 log = logging.getLogger("cover")
 
@@ -87,9 +87,14 @@ def generate(
     quality: Quality = FINAL,
     profile: PrinterProfile = DEFAULT_PROFILE,
     fields: Fields | None = None,
+    surface: SurfaceBase | None = None,
+    extra_holes=None,
 ) -> Cover:
+    """`surface` overrides the analytic shin, which is how a cover whose shape
+    is measured rather than drawn — the anatomic tab — gets the same four axes
+    of pattern, mask, relief and finish without a second pipeline."""
     p = params.clamped()
-    surface = Surface.from_params(p)
+    surface = surface if surface is not None else Surface.from_params(p)
     f = fields or Fields.from_params(p)
     notes: list[str] = []
 
@@ -98,7 +103,7 @@ def generate(
     max_wall = surface.max_wall_thickness(profile, RANGES["wall_thickness"].hi)
     wall = min(p.wall_thickness, max_wall)
     if wall < p.wall_thickness - 1e-6:
-        notes.append(f"Wall held at {wall:.1f} mm by the curve of the calf")
+        notes.append(f"Wall held at {wall:.1f} mm by the curve of the leg")
 
     strut = max(p.strut_width, profile.MIN_STRUT)
     if p.cuts_through and strut > p.strut_width + 1e-6:
@@ -125,7 +130,7 @@ def generate(
 
     if p.operation == "cut":
         body, plain_volume, holes = _cut(
-            p, f.mask, surface, cells, wall, strut, quality, profile, notes
+            p, f.mask, surface, cells, wall, strut, quality, profile, notes, extra_holes
         )
     elif p.has_relief:
         body, plain_volume = _relief(p, f.mask, surface, cells, wall, depth, quality)
@@ -196,6 +201,7 @@ def _cut(
     quality: Quality,
     profile: PrinterProfile,
     notes: list[str],
+    extra_holes=None,
 ):
     # How far a mesh edge may bow into a strut. Paid back in the erosion, and
     # held down by splitting long edges, so the strut survives both.
@@ -224,19 +230,36 @@ def _cut(
     if p.hole_shape == "image" and placement is None:
         notes.append("No picture held, cells used")
 
+    rings = list(pattern.holes)
+    if extra_holes is not None:
+        # Large motifs the cell field would only blur. They come with the
+        # ground they need: cells inside it come out, so the drawing reads
+        # against solid wall instead of against more holes.
+        added, added_notes, keepout = extra_holes(surface, cells, strut)
+        notes.extend(added_notes)
+        if added:
+            if keepout is not None and rings:
+                u_lo, u_hi, v_lo, v_hi = keepout
+                centres = np.array([r.mean(axis=0) for r in rings])
+                # u is periodic, so compare on the shortest way round.
+                du = (centres[:, 0] - (u_lo + u_hi) / 2.0 + 0.5) % 1.0 - 0.5
+                inside = (np.abs(du) < (u_hi - u_lo) / 2.0) & (centres[:, 1] > v_lo) & (centres[:, 1] < v_hi)
+                rings = [r for r, hit in zip(rings, inside) if not hit]
+            rings.extend(added)
+
     plain = mb.shell(surface, wall, quality.nu, quality.nv)
     # A prism must never be deep enough to touch the far side of the cover.
     v = np.linspace(0.0, 1.0, 64)
     thinnest = float(np.min(np.minimum(*surface.semi_axes(v))))
     prisms = mb.hole_prisms(
         surface,
-        pattern.holes,
+        rings,
         wall,
         surface.min_curvature_radius(),
         max_clear=0.3 * max(thinnest - wall, 1.0),
         chord_tolerance=chord_tolerance,
     )
-    return mb.perforate(plain, prisms), float(plain.volume), len(pattern.holes)
+    return mb.perforate(plain, prisms), float(plain.volume), len(rings)
 
 
 def _relief(

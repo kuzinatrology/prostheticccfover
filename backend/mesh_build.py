@@ -30,9 +30,17 @@ def _flip_if_inverted(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
 
 
 def shell(surface: Surface, thickness: float, nu: int, nv: int) -> trimesh.Trimesh:
-    """Closed tube of constant wall thickness, open at neither end (a solid)."""
+    """Closed tube of constant wall thickness, open at neither end (a solid).
+
+    A surface may say for itself how its wall goes inward. One with a rim cut
+    at a steep angle has to: along the normal, an inner vertex slides sideways
+    into a neighbouring column, and if that column is cut lower the wall ends
+    up above the rim — outside the shape the edge was cut to.
+    """
     outer, normal = surface.grid(nu, nv)
-    return shell_from(outer, outer - normal * thickness)
+    inward = getattr(surface, "inner_grid", None)
+    inner = inward(outer, thickness) if inward else outer - normal * thickness
+    return shell_from(outer, inner)
 
 
 def shell_from(outer: np.ndarray, inner: np.ndarray) -> trimesh.Trimesh:

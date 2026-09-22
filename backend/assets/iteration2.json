@@ -1,0 +1,33 @@
+{
+  "source": "Cover new.stl",
+  "faces": 18596,
+  "samples": 3000000,
+  "wall_mm": 4.95,
+  "wall_radial_median_mm": 5.04,
+  "wall_radial_p5_mm": 4.98,
+  "wall_radial_p95_mm": 5.2,
+  "lean_factor": 0.9815,
+  "height_mm": 493.1,
+  "bottom_rim_mm": [
+    -26.2,
+    -24.8
+  ],
+  "top_rim_mm": [
+    464.1,
+    466.9
+  ],
+  "radius_mm": [
+    44.1,
+    79.2
+  ],
+  "coverage": 0.967,
+  "shift_mm": [
+    2.63,
+    1105.54,
+    -26.23
+  ],
+  "grid": [
+    495,
+    360
+  ]
+}

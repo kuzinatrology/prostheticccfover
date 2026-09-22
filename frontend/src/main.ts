@@ -17,19 +17,28 @@ import {
   type Schema,
   type Silhouette,
 } from "./api";
-import { Panel, TRANSFEMORAL, TRANSTIBIAL, type PanelLayout } from "./panel";
+import {
+  ANATOMIC,
+  ITERATION1,
+  ITERATION2,
+  Panel,
+  REFERENCE,
+  TRANSFEMORAL,
+  TRANSTIBIAL,
+  type PanelLayout,
+} from "./panel";
 import { has, strings } from "./strings.en";
 import { Viewer } from "./viewer";
 
 const DEBOUNCE_MS = 250;
 
 /**
- * Two covers, one tab each. They share every control they have in common and
+ * Four covers, one tab each. They share every control they have in common and
  * the whole of this file; what differs is where the service lives, which
  * groups the panel shows and what the masthead says.
  */
 interface Mode {
-  key: "transtibial" | "transfemoral";
+  key: "transtibial" | "transfemoral" | "anatomic" | "iter1" | "iter2" | "reference";
   base: string;
   layout: PanelLayout;
   title: string;
@@ -53,6 +62,38 @@ const MODES: Mode[] = [
     title: strings.transfemoral.masthead.title,
     subtitle: strings.transfemoral.masthead.subtitle,
     specKeys: strings.transfemoral.specKeys,
+  },
+  {
+    key: "anatomic",
+    base: "/api/anat",
+    layout: ANATOMIC,
+    title: strings.anatomic.masthead.title,
+    subtitle: strings.anatomic.masthead.subtitle,
+    specKeys: strings.anatomic.specKeys,
+  },
+  {
+    key: "iter1",
+    base: "/api/iter1",
+    layout: ITERATION1,
+    title: strings.iter1.masthead.title,
+    subtitle: strings.iter1.masthead.subtitle,
+    specKeys: strings.iter1.specKeys,
+  },
+  {
+    key: "iter2",
+    base: "/api/iter2",
+    layout: ITERATION2,
+    title: strings.iter2.masthead.title,
+    subtitle: strings.iter2.masthead.subtitle,
+    specKeys: strings.iter2.specKeys,
+  },
+  {
+    key: "reference",
+    base: "/api/ref",
+    layout: REFERENCE,
+    title: strings.reference.masthead.title,
+    subtitle: strings.reference.masthead.subtitle,
+    specKeys: strings.reference.specKeys,
   },
 ];
 
@@ -89,6 +130,9 @@ let params: Params;
 let panel: Panel;
 let viewer: Viewer;
 let specLine: HTMLElement | null = null;
+/** The anatomic tab's own line: the two numbers that decide whether the cover
+ * is usable at all, which no slider position can be read off. */
+let checkLine: HTMLElement | null = null;
 let explodeMm = 70;
 
 let timer: number | undefined;
@@ -162,6 +206,28 @@ function buildMasthead(): void {
   specLine = document.createElement("span");
   line.append(specLine);
   masthead.append(line);
+
+  if (mode.key === "anatomic" || mode.key === "reference") {
+    checkLine = document.createElement("p");
+    checkLine.className = "masthead-spec";
+    masthead.append(checkLine);
+  }
+}
+
+/** Flexion and clearance, straight off the last build. */
+function updateChecks(stats: { flexion?: { max_angle: number; clears: boolean }; min_gap_mm?: number }): void {
+  if (!checkLine) return;
+  const words = strings.anatomic;
+  const parts: string[] = [];
+  if (stats.flexion) {
+    const angle = `${stats.flexion.max_angle.toFixed(0)}\u00b0`;
+    parts.push(`${words.flexionLabel} ${angle}${stats.flexion.clears ? "" : ` \u2014 ${words.jammed}`}`);
+  }
+  if (stats.min_gap_mm !== undefined) {
+    parts.push(`${words.gapLabel} ${stats.min_gap_mm.toFixed(1)} mm`);
+  }
+  checkLine.textContent = parts.join(strings.masthead.specSeparator);
+  checkLine.classList.toggle("masthead-spec-warn", stats.flexion ? !stats.flexion.clears : false);
 }
 
 function updateSpec(): void {
@@ -243,6 +309,7 @@ async function run(draft: boolean): Promise<void> {
     await viewer.setModel(glb);
     viewer.setFinish(stats.finish);
     panel.setStats(stats);
+    updateChecks(stats as never);
     panel.setCap("wall_thickness", stats.max_wall_thickness);
     panel.setCap("relief_depth", stats.max_relief_depth);
     for (const [key, [lo, hi]] of Object.entries(stats.limits ?? {})) {

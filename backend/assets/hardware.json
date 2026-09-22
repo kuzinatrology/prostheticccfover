@@ -1,0 +1,89 @@
+{
+  "source": "anatomic/work/stage2_prosthesis.stl",
+  "frame": "knee axis at the origin, z up, y forward",
+  "grid": [
+    231,
+    360
+  ],
+  "z_range": [
+    -380.0,
+    80.0
+  ],
+  "z_step": 2.0,
+  "rows_measured": 219,
+  "coverage_median": 0.625,
+  "parts_z": {
+    "pylon": [
+      -115.0,
+      0.0
+    ],
+    "knee": [
+      0.0,
+      249.5
+    ],
+    "socket": [
+      249.5,
+      490.5
+    ],
+    "foot_adapter": [
+      -230.5,
+      -115.0
+    ],
+    "foot": [
+      -357.0,
+      -230.5
+    ]
+  },
+  "pylon": {
+    "fit_range": [
+      -330.0,
+      -210.0
+    ],
+    "sections": 61,
+    "x_of_z": [
+      0.017259774559043494,
+      -10.117502745311855
+    ],
+    "y_of_z": [
+      3.0211035394934707e-05,
+      -6.92265135307398
+    ],
+    "tilt_deg": 0.99,
+    "radius_fitted_mm": 17.33,
+    "radius_spread_mm": 0.43,
+    "radius_catalogue_mm": 17.0,
+    "median_residual_mm": 0.77,
+    "outline_length_mm": 134.0,
+    "circumference_mm": 107.0
+  },
+  "registrations": {
+    "iteration1": {
+      "model": "iteration1",
+      "shift_mm": [
+        16.32,
+        15.97,
+        416.57
+      ],
+      "cover_zero_at_knee_z": -416.6,
+      "min_gap_mm": -0.41,
+      "p1_gap_mm": 1.15,
+      "median_gap_mm": 18.61,
+      "interfering_fraction": 0.00074,
+      "cover_wall_mm": 4.94
+    },
+    "iteration2": {
+      "model": "iteration2",
+      "shift_mm": [
+        3.79,
+        11.21,
+        427.22
+      ],
+      "cover_zero_at_knee_z": -427.2,
+      "min_gap_mm": 7.52,
+      "p1_gap_mm": 10.74,
+      "median_gap_mm": 28.99,
+      "interfering_fraction": 0.0,
+      "cover_wall_mm": 4.95
+    }
+  }
+}

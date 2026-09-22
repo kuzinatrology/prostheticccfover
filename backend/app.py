@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import anatomic_api
 from .export import FORMATS, preview_glb, write
 from .generator import DRAFT, FINAL, Cover, audit, generate
 from .motif import LIBRARY, MAX_BYTES, Motif, MotifError, held
@@ -310,6 +311,324 @@ def post_tf_download(req: Request, fmt: str = "3mf", body: str = "all") -> Respo
     return Response(
         content=data,
         media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+# --- the anatomical cover ----------------------------------------------
+#
+# A third tab, and a different kind of object: the shape is not drawn by
+# sliders but measured off a scan of the prosthesis and off a human shank,
+# so the handful of controls here are tolerances and the shape of the rim.
+
+
+@app.get("/api/anat/schema")
+def get_anat_schema() -> dict[str, Any]:
+    return anatomic_api.schema()
+
+
+def _anat(req: Request) -> tuple[Cover, dict[str, Any]]:
+    built = anatomic_api.build(req.params, req.draft)
+    return built["cover"], anatomic_api.stats(built, built["seconds"], req.draft)
+
+
+@app.post("/api/anat/cover")
+def post_anat_cover(req: Request) -> Response:
+    cover, stats = _anat(req)
+    return Response(
+        content=preview_glb(cover),
+        media_type="model/gltf-binary",
+        headers={"X-Cover": quote(json.dumps(stats))},
+    )
+
+
+@app.post("/api/anat/download")
+def post_anat_download(req: Request, fmt: str = "3mf") -> Response:
+    if fmt not in FORMATS:
+        raise HTTPException(400, f"unknown format {fmt!r}")
+    req.draft = False
+    cover, stats = _anat(req)
+    faults = audit(cover)
+    if faults:
+        log.error("shipping a file that failed audit: %s", "; ".join(faults))
+    if not stats["flexion"]["clears"]:
+        log.error(
+            "shipping an anatomical cover that jams at %.0f degrees",
+            stats["flexion"]["max_angle"],
+        )
+    name = f"cover-anatomic-{cover.params.material}-{cover.mass_g:.0f}g.{fmt}"
+    return Response(
+        content=write(cover, fmt),
+        media_type=FORMATS[fmt],
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+# --- the modelled cover ------------------------------------------------
+#
+# A fourth tab, and the other way round from the rest: the shape is not drawn
+# by sliders and not derived from a scan, but taken from `cover ready
+# iteration 1.stl`, modelled in Rhino.  The service measures that file once
+# into a radius over (angle, height); what the sliders do is give it a wall
+# and a pattern.
+
+from .iteration1 import export as it_export  # noqa: E402
+from .iteration1.generator import DRAFT as IT_DRAFT  # noqa: E402
+from .iteration1.generator import FINAL as IT_FINAL  # noqa: E402
+from .iteration1.generator import IterCover, audit as it_audit  # noqa: E402
+from .iteration1.generator import generate as it_generate  # noqa: E402
+from .iteration1.params import IterParams, schema as it_schema  # noqa: E402
+from .iteration1.presets import as_json as it_presets_json  # noqa: E402
+from .iteration2 import export as it2_export  # noqa: E402
+from .iteration2.generator import DRAFT as IT2_DRAFT  # noqa: E402
+from .iteration2.generator import FINAL as IT2_FINAL  # noqa: E402
+from .iteration2.generator import Iter2Cover, audit as it2_audit  # noqa: E402
+from .iteration2.generator import generate as it2_generate  # noqa: E402
+from .iteration2.params import Iter2Params, schema as it2_schema  # noqa: E402
+from .iteration2.presets import as_json as it2_presets_json  # noqa: E402
+
+
+@lru_cache(maxsize=8)
+def _it_build(frozen: tuple, draft: bool) -> IterCover:
+    params = IterParams(**dict(frozen))
+    return it_generate(params, quality=IT_DRAFT if draft else IT_FINAL, profile=DEFAULT_PROFILE)
+
+
+def _it_cover(req: Request) -> tuple[IterCover, float]:
+    params = IterParams.from_dict(req.params)
+    started = time.time()
+    cover = _it_build(tuple(sorted(params.to_dict().items())), req.draft)
+    return cover, time.time() - started
+
+
+def _it_stats(cover: IterCover, seconds: float, draft: bool) -> dict[str, Any]:
+    p = cover.params
+    m = p.material_spec
+    return {
+        "mass_g": round(cover.mass_g, 1),
+        "plain_mass_g": round(cover.plain_mass_g, 1),
+        "saving_pct": round(cover.saving_pct),
+        "delta_g": round(cover.mass_g - cover.plain_mass_g, 1),
+        "holes": cover.holes,
+        "triangles": len(cover.mesh.faces),
+        "max_wall_thickness": round(cover.max_wall, 2),
+        "max_relief_depth": round(cover.max_relief, 2),
+        "limits": {k: [round(lo, 2), round(hi, 2)] for k, (lo, hi) in cover.limits.items()},
+        "operation": p.operation,
+        "cuts_through": p.cuts_through,
+        "notes": cover.notes,
+        "material": {"key": m.key, "label": m.label, "hex": m.hex, "polymer": m.polymer},
+        "finish": {
+            "mode": p.finish,
+            "colour_a": m.hex,
+            "colour_b": p.colour_b_spec.hex,
+            "facet_scale": p.facet_scale,
+        },
+        "wall_mm": round(cover.wall, 2),
+        "draft": draft,
+        "seconds": round(seconds, 2),
+    }
+
+
+@app.get("/api/iter1/schema")
+def get_it_schema() -> dict[str, Any]:
+    out = it_schema(min_strut=DEFAULT_PROFILE.MIN_STRUT)
+    out["profile"] = {
+        "name": DEFAULT_PROFILE.name,
+        "min_strut": DEFAULT_PROFILE.MIN_STRUT,
+        "min_hole": DEFAULT_PROFILE.MIN_HOLE,
+        "clearance": DEFAULT_PROFILE.CLEARANCE,
+    }
+    out["profiles"] = list(PROFILES)
+    out["formats"] = ["3mf", "stl"]
+    out["presets"] = it_presets_json()
+    return out
+
+
+@app.post("/api/iter1/cover")
+def post_it_cover(req: Request) -> Response:
+    cover, seconds = _it_cover(req)
+    return Response(
+        content=it_export.preview_glb(cover),
+        media_type="model/gltf-binary",
+        headers={"X-Cover": quote(json.dumps(_it_stats(cover, seconds, req.draft)))},
+    )
+
+
+@app.post("/api/iter1/download")
+def post_it_download(req: Request, fmt: str = "3mf") -> Response:
+    if fmt not in ("3mf", "stl"):
+        raise HTTPException(400, f"unknown format {fmt!r}")
+    req.draft = False
+    cover, _ = _it_cover(req)
+    faults = it_audit(cover)
+    if faults:
+        log.error("shipping a file that failed audit: %s", "; ".join(faults))
+    name = f"cover-iteration1-{cover.params.material}-{cover.mass_g:.0f}g.{fmt}"
+    return Response(
+        content=it_export.write(cover, fmt),
+        media_type=FORMATS[fmt],
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+# --- the second modelled cover, with its fasteners --------------------------
+#
+# A fifth tab.  The shape is another Rhino file; what it has that the fourth
+# has not is the attachment: the cover is cut into a front and a back, the
+# seam carries magnets, and two clamps hold it on the pylon.  So its answers
+# are four bodies, and it borrows the transfemoral tab's way of shipping them:
+# one file per body, a zip of all of them, and a GLB whose nodes are named so
+# the viewer can pull the loose parts away from the cover.
+
+
+@lru_cache(maxsize=8)
+def _it2_build(frozen: tuple, draft: bool) -> Iter2Cover:
+    params = Iter2Params(**dict(frozen))
+    return it2_generate(params, quality=IT2_DRAFT if draft else IT2_FINAL,
+                        profile=DEFAULT_PROFILE)
+
+
+def _it2_cover(req: Request) -> tuple[Iter2Cover, float]:
+    params = Iter2Params.from_dict(req.params)
+    started = time.time()
+    cover = _it2_build(tuple(sorted(params.to_dict().items())), req.draft)
+    return cover, time.time() - started
+
+
+def _it2_stats(cover: Iter2Cover, seconds: float, draft: bool) -> dict[str, Any]:
+    p = cover.params
+    m = p.material_spec
+    return {
+        "mass_g": round(cover.mass_g, 1),
+        "plain_mass_g": round(cover.plain_mass_g, 1),
+        "saving_pct": round(cover.saving_pct),
+        "delta_g": round(cover.mass_g - cover.plain_mass_g, 1),
+        "holes": cover.holes,
+        "triangles": sum(len(m2.faces) for m2 in cover.bodies.values()),
+        "max_wall_thickness": round(cover.max_wall, 2),
+        "max_relief_depth": round(cover.max_relief, 2),
+        "limits": {k: [round(lo, 2), round(hi, 2)] for k, (lo, hi) in cover.limits.items()},
+        "operation": p.operation,
+        "cuts_through": p.cuts_through,
+        "notes": cover.notes,
+        "material": {"key": m.key, "label": m.label, "hex": m.hex, "polymer": m.polymer},
+        "finish": {
+            "mode": p.finish,
+            "colour_a": m.hex,
+            "colour_b": p.colour_b_spec.hex,
+            "facet_scale": p.facet_scale,
+        },
+        "wall_mm": round(cover.wall, 2),
+        "bodies": {
+            it2_export.LABELS[k]: round(v, 1) for k, v in cover.masses.items()
+        },
+        "draft": draft,
+        "seconds": round(seconds, 2),
+    }
+
+
+@app.get("/api/iter2/schema")
+def get_it2_schema() -> dict[str, Any]:
+    out = it2_schema(min_strut=DEFAULT_PROFILE.MIN_STRUT)
+    out["profile"] = {
+        "name": DEFAULT_PROFILE.name,
+        "min_strut": DEFAULT_PROFILE.MIN_STRUT,
+        "min_hole": DEFAULT_PROFILE.MIN_HOLE,
+        "clearance": DEFAULT_PROFILE.CLEARANCE,
+    }
+    out["profiles"] = list(PROFILES)
+    out["formats"] = ["3mf", "stl"]
+    out["presets"] = it2_presets_json()
+    out["bodies"] = list(it2_export.LABELS)
+    return out
+
+
+@app.post("/api/iter2/cover")
+def post_it2_cover(req: Request) -> Response:
+    cover, seconds = _it2_cover(req)
+    return Response(
+        content=it2_export.preview_glb(cover),
+        media_type="model/gltf-binary",
+        headers={"X-Cover": quote(json.dumps(_it2_stats(cover, seconds, req.draft)))},
+    )
+
+
+@app.post("/api/iter2/download")
+def post_it2_download(req: Request, fmt: str = "3mf", body: str = "all") -> Response:
+    if fmt not in ("3mf", "stl"):
+        raise HTTPException(400, f"unknown format {fmt!r}")
+    req.draft = False
+    cover, _ = _it2_cover(req)
+    faults = it2_audit(cover)
+    if faults:
+        log.error("shipping files that failed audit: %s", "; ".join(faults))
+    stem = f"cover-iteration2-{cover.params.material}-{cover.mass_g:.0f}g"
+    if body == "all":
+        data = it2_export.bundle(cover, fmt)
+        media, name = "application/zip", f"{stem}.zip"
+    elif body in cover.bodies:
+        data = (it2_export.body_3mf(cover, body) if fmt == "3mf"
+                else it2_export.body_stl(cover, body))
+        media, name = FORMATS[fmt], f"{stem}-{it2_export.LABELS[body]}.{fmt}"
+    else:
+        raise HTTPException(400, f"unknown body {body!r}")
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+# --- the same cover, shaped by the reference renders ------------------------
+#
+# A fourth tab. ref_2 is a straight side view, so the top boundary of its
+# silhouette is the rim curve itself and the notch can be measured instead of
+# guessed; the girth profile is the mean of both renders. What the renders
+# cannot say is where the cover sits on the leg, and that turns out to matter:
+# the traced notch is narrow, and a narrow notch will not clear the thigh at
+# deep flexion however deep it is cut. Sitting the cover lower does, with the
+# reference's own shape untouched.
+
+
+@app.get("/api/ref/schema")
+def get_ref_schema() -> dict[str, Any]:
+    return anatomic_api.schema(from_reference=True)
+
+
+def _ref(req: Request) -> tuple[Cover, dict[str, Any]]:
+    built = anatomic_api.build(req.params, req.draft, from_reference=True)
+    return built["cover"], anatomic_api.stats(built, built["seconds"], req.draft)
+
+
+@app.post("/api/ref/cover")
+def post_ref_cover(req: Request) -> Response:
+    cover, stats = _ref(req)
+    return Response(
+        content=preview_glb(cover),
+        media_type="model/gltf-binary",
+        headers={"X-Cover": quote(json.dumps(stats))},
+    )
+
+
+@app.post("/api/ref/download")
+def post_ref_download(req: Request, fmt: str = "3mf") -> Response:
+    if fmt not in FORMATS:
+        raise HTTPException(400, f"unknown format {fmt!r}")
+    req.draft = False
+    cover, stats = _ref(req)
+    faults = audit(cover)
+    if faults:
+        log.error("shipping a file that failed audit: %s", "; ".join(faults))
+    if not stats["flexion"]["clears"]:
+        log.error(
+            "shipping a reference cover that jams at %.0f degrees",
+            stats["flexion"]["max_angle"],
+        )
+    name = f"cover-reference-{cover.params.material}-{cover.mass_g:.0f}g.{fmt}"
+    return Response(
+        content=write(cover, fmt),
+        media_type=FORMATS[fmt],
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
 

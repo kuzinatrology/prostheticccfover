@@ -1,11 +1,14 @@
 # Prosthetic cover configurator
 
-A prototype web configurator for cosmetic covers. Two tabs: **below knee**
-(transtibial, the shape of the leg set by sliders) and **above knee**
-(transfemoral, College Park Capital knee, the shape of the leg taken from a
-scan of the other leg). Move the sliders, watch the cover turn, read its
-weight, download a print file. The transfemoral tab is described in its own
-section below; everything else here applies to both.
+A prototype web configurator for cosmetic covers. Four tabs, one per cover,
+differing in where the shape comes from: **below knee** (transtibial, the
+shape of the leg set by sliders), **above knee** (transfemoral, College Park
+Capital knee, the shape taken from a scan of the other leg), **anatomic
+shank** (built by the offline pipeline in `anatomic/` from the prosthesis scan
+and a MakeHuman shank), and **iteration 1** (a cover modelled in Rhino and
+handed to the configurator as a file). Move the sliders, watch the cover turn,
+read its weight, download a print file. The transfemoral and the modelled tabs
+have their own sections below; everything else here applies to all of them.
 
 The whole point of the build is the last mile: **a design that fails a
 printability check is not reachable**. Every constraint is built into the
@@ -531,6 +534,127 @@ kinds, all fixed: the rectangular hole's round corners clipping the module's
 square ones; shelves running into the tube at the ankle; the notch read at
 two depths when the swept thigh is not monotonic through the wall; and rays
 through a shared mesh edge counted as a wall a hundredth of a millimetre thick.
+
+## The modelled tab
+
+`backend/iteration1/` is the other way round from every tab before it. The
+first draws a cover from sliders, the second and third derive one from a scan;
+this one is handed a cover that someone already modelled — `cover ready
+iteration 1.stl`, exported from Rhino — and its job is to keep that shape, let
+it be worn differently, and put a wall and a pattern on it. The design
+controls are the shared ones; what is gone is every control that would draw a
+silhouette from nothing.
+
+```bash
+.venv/bin/python -m backend.iteration1.prepare     # once per model file
+.venv/bin/python -m pytest tests/test_iteration1.py -q
+```
+
+### Reading the file
+
+`prepare.py` scatters three million points over the export's faces and bins
+them by angle and height about a fitted centreline. In each cell the samples
+split into two skins at the midpoint between the nearest and the farthest, and
+each skin is the **mean** of its own samples: taking the extremes rings, since
+the farthest of nine samples on a slanted triangle sits high by a fraction of
+that triangle and which fraction depends on where the export's rows fell. The
+result is `backend/assets/iteration1.npz` — outer radius, wall, coverage,
+centreline and the two rim curves — and `iteration1.json`, what it found.
+
+The file is a closed cover with a 4.9 mm wall, 462 mm tall, whose top rim runs
+from 323 mm at the back of the knee to 457 at the sides. Read back, the stored
+surface sits 0.01 mm from the model's outer skin at the median and 0.05 mm at
+the 95th percentile, against triangles of the export that are millimetres
+across.
+
+Angles are stored over 0 to 2 pi, the range the surface reads them back in.
+Stored over -pi to pi they would land outside the spline's knots for half the
+turn and be extrapolated instead of read, and half the cover would come out
+invented — which is what happened, and is what `test_the_stored_surface_is_the_modelled_one`
+now holds down.
+
+### Wearing the file differently
+
+The shape is the file, but that is not the same as the shape being fixed. The
+**Silhouette** and **Rim and notch** groups hold eight knobs, and every one of
+them is a transformation of the measured surface rather than a shape of its
+own: girth (`fullness`), the section squashed front to back or side to side
+(`ovality`), how much of the swell is carried behind the axis
+(`posterior_bias`), the turn between the two rims (`twist`), the cover
+stretched along its axis (`height_scale`), and three cuts — `top_trim`,
+`bottom_trim` and `notch_deepen`. So no slider can invent a cover the file
+does not have: a fuller cover is this cover fuller.
+
+They are applied to the section about its own centre in the transtibial
+surface's order, so a design reads the same on this cover as on that one, and
+the surface is cached on all eight together — moving a pattern slider re-reads
+the same shaped surface instead of building it again.
+
+`notch_deepen` is the one worth spelling out: it lowers the rim in proportion
+to how much of a notch the rim already is at that angle, so the deepest point
+moves by the whole slider and the high sides do not move at all. The trims
+cannot make the two rims cross; a column is never left shorter than 30 mm.
+
+### Starting points
+
+The same six presets the other tabs offer — Lattice, Chevron, Scales, Vent,
+Facet, Ridge — carried over by key through `backend/iteration1/presets.py`,
+the way the transfemoral tab carries them. Every value in every one of them
+survives the carry: a preset is made of design values, and this cover has all
+of them. A preset moves the pattern and nothing else, so where the shape
+sliders were left is where they stay.
+
+### The rims
+
+The two rim curves are what makes this cover different from a tube, and every
+field that decides where material and holes may go is read from them rather
+than from a grid: `edge_distance(u, v)` is the height to the nearer rim.
+Cells fade out over 14 mm toward it, a plain band the **Plain band at the rim**
+slider wide is left solid, and a hole is kept only if its whole outline stays
+that band plus a strut clear. So the pattern ends on whole holes and the edge
+is an edge.
+
+### The wall
+
+Laid down the radius, not along the normal. The cover is star shaped about its
+axis and its walls stand within a few degrees of vertical, so a smaller radius
+is what a wall inward means. Offsetting along the normal is what a general
+solid would need and it is exactly what goes wrong here: over the rim the
+normal turns up across the edge, and a skin offset along it climbs above the
+rim and crosses the skin it came from — a rim of spikes. How much of the
+normal is radial is divided back out so the wall measured across the skin is
+the one the slider asks for; it is read a few millimetres inside the rim,
+where the surface is the shape rather than the edge, and smoothed around the
+section, because a wall that changes by a tenth of a millimetre per column is
+a rippled rim band.
+
+The slider starts on the wall the model was drawn with and reaches 8 mm rather
+than the 4 mm the other tabs stop at: a range that could not reach the file's
+own wall would refuse the model on the way in. Where the curvature of the
+model binds first, the generator says so and the panel shortens the track.
+
+### Output
+
+One body, so one file: 3MF with the cover's colour, or STL. The plain shell
+rebuilt from the grid holds 672 cm3 against the file's 676, the difference
+being the wall measured across the skin rather than along the radius. A cut
+pattern at the default density takes that to about 420 g in PETG, half the
+plain weight, over roughly 3300 holes.
+
+A draft takes about 20 seconds against 8 for the transfemoral tab and 5 for
+the transtibial one. Nothing here is slower than those; the cover is simply
+the largest surface in the app and carries the most cells, and most of the
+time is in the shared pattern builder.
+
+### Tests
+
+`tests/test_iteration1.py` holds the two kinds of claim apart. That the tab
+still describes the file: the stored surface is the model's skin, the rims are
+the model's rims, the plain shell is the model's solid. And the claim every
+tab makes: each operation gives one closed body, no hole opens onto a rim, the
+wall measured by rays through the solid is the wall asked for, no setting at
+the end of a range refuses a cover, and the smoothing slider never moves the
+surface more than half a millimetre off the file.
 
 ## Out of scope
 
