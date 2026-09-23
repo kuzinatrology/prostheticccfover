@@ -25,6 +25,11 @@ MOUNT_RANGES: dict[str, Range] = {
     "magnet_count": Range(0.0, 8.0, 1.0, ""),
     "bolt_diameter": Range(3.0, 5.0, 1.0, "mm"),
     "clamp_count": Range(0.0, 2.0, 1.0, ""),
+    "seam_curve": Range(0.0, 40.0, 1.0, "mm"),
+    "flexion": Range(60.0, 130.0, 5.0, "deg"),
+    "leaf_count": Range(1.0, 7.0, 1.0, ""),
+    "leaf_size": Range(30.0, 110.0, 1.0, "mm"),
+    "leaf_tilt": Range(0.0, 45.0, 1.0, "deg"),
     "lower_clamp_z": Range(-400.0, 500.0, 1.0, "mm"),
     "upper_clamp_z": Range(-400.0, 500.0, 1.0, "mm"),
 }
@@ -44,11 +49,19 @@ tube itself, which is what a fresh tab should show."""
 @dataclass
 class Iter2Params(IterParams):
     model: str = MODEL
-    magnet_diameter: float = 6.0
+    magnet_diameter: float = 4.0
     magnet_height: float = 3.0
     magnet_count: float = 5.0
     bolt_diameter: float = 4.0
     nut_kind: str = "heat_set"
+    seam_curve: float = fc.SEAM_CURVE
+    flexion: float = fc.FLEXION_ANGLE
+    # Leaves on the back, the same feature the other tabs carry: large drawn
+    # panels instead of cells, down the back midline.
+    back_leaves: bool = False
+    leaf_count: float = 3.0
+    leaf_size: float = 70.0
+    leaf_tilt: float = 20.0
     clamp_count: float = 2.0
     lower_clamp_z: float = UNPLACED
     upper_clamp_z: float = UNPLACED
@@ -73,6 +86,7 @@ class Iter2Params(IterParams):
             if key.endswith("_clamp_z") and value <= UNPLACED / 2.0:
                 continue
             data[key] = float(min(max(value, rng.lo), rng.hi))
+        data["back_leaves"] = bool(data["back_leaves"])
         if data["nut_kind"] not in fc.NUT_KINDS:
             data["nut_kind"] = fc.NUT_KINDS[0]
         return out

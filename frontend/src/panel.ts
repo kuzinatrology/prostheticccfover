@@ -205,9 +205,17 @@ export const ITER_GROUPS: Group[] = [
 export const ITER2_GROUPS: Group[] = [
   ...ITER_GROUPS,
   {
+    key: "leaves",
+    toggles: ["back_leaves"],
+    params: ["leaf_count", "leaf_size", "leaf_tilt"],
+    when: CUTS,
+  },
+  {
     key: "mount",
     choices: ["nut_kind"],
     params: [
+      "seam_curve",
+      "flexion",
       "magnet_count",
       "magnet_diameter",
       "magnet_height",
@@ -257,9 +265,24 @@ export const ANATOMIC: PanelLayout = {
 
 export const ITERATION1: PanelLayout = { groups: ITER_GROUPS, rowWhen: ROW_WHEN, bodies: false };
 
+/**
+ * The prototype tab: everything Iteration 2 has, with the two handles that
+ * make it a prototype at the top, where they are looked for.
+ */
+export const PROTO_GROUPS: Group[] = [
+  { key: "prototype", params: ["scale", "beside_gap"] },
+  ...ITER2_GROUPS,
+];
+
+export const PROTOTYPE: PanelLayout = {
+  groups: PROTO_GROUPS,
+  rowWhen: { ...ROW_WHEN, leaf_count: LEAVES, leaf_size: LEAVES, leaf_tilt: LEAVES },
+  bodies: true,
+};
+
 export const ITERATION2: PanelLayout = {
   groups: ITER2_GROUPS,
-  rowWhen: ROW_WHEN,
+  rowWhen: { ...ROW_WHEN, leaf_count: LEAVES, leaf_size: LEAVES, leaf_tilt: LEAVES },
   bodies: true,
 };
 

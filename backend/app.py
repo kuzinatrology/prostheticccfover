@@ -386,6 +386,12 @@ from .iteration2.generator import Iter2Cover, audit as it2_audit  # noqa: E402
 from .iteration2.generator import generate as it2_generate  # noqa: E402
 from .iteration2.params import Iter2Params, schema as it2_schema  # noqa: E402
 from .iteration2.presets import as_json as it2_presets_json  # noqa: E402
+from .prototype import export as pr_export  # noqa: E402
+from .prototype.generator import DRAFT as PR_DRAFT  # noqa: E402
+from .prototype.generator import FINAL as PR_FINAL  # noqa: E402
+from .prototype.generator import ProtoCover, audit as pr_audit  # noqa: E402
+from .prototype.generator import generate as pr_generate  # noqa: E402
+from .prototype.params import ProtoParams, schema as pr_schema  # noqa: E402
 
 
 @lru_cache(maxsize=8)
@@ -472,6 +478,33 @@ def post_it_download(req: Request, fmt: str = "3mf") -> Response:
     )
 
 
+LAST_BUILD = pathlib.Path(__file__).resolve().parents[1] / "out" / "last_build.json"
+"""Where the settings of the most recent build of each tab are kept.
+
+The interface holds its sliders in the open page and nowhere else, so once a
+page is reloaded what someone had set is gone.  This is the only record of it,
+and it is what lets a question like "scale what is on the screen" be answered
+at all."""
+
+
+def _recorded(tab: str) -> dict[str, Any]:
+    """What that tab last built, if anything."""
+    try:
+        return json.loads(LAST_BUILD.read_text()).get(tab, {}).get("params", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _record(tab: str, params: dict[str, Any]) -> None:
+    try:
+        LAST_BUILD.parent.mkdir(parents=True, exist_ok=True)
+        seen = json.loads(LAST_BUILD.read_text()) if LAST_BUILD.exists() else {}
+        seen[tab] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "params": params}
+        LAST_BUILD.write_text(json.dumps(seen, indent=2, ensure_ascii=False))
+    except OSError:
+        pass  # A prototype's convenience must never fail a build.
+
+
 # --- the second modelled cover, with its fasteners --------------------------
 #
 # A fifth tab.  The shape is another Rhino file; what it has that the fourth
@@ -491,6 +524,7 @@ def _it2_build(frozen: tuple, draft: bool) -> Iter2Cover:
 
 def _it2_cover(req: Request) -> tuple[Iter2Cover, float]:
     params = Iter2Params.from_dict(req.params)
+    _record("iter2", params.to_dict())
     started = time.time()
     cover = _it2_build(tuple(sorted(params.to_dict().items())), req.draft)
     return cover, time.time() - started
@@ -571,6 +605,93 @@ def post_it2_download(req: Request, fmt: str = "3mf", body: str = "all") -> Resp
         data = (it2_export.body_3mf(cover, body) if fmt == "3mf"
                 else it2_export.body_stl(cover, body))
         media, name = FORMATS[fmt], f"{stem}-{it2_export.LABELS[body]}.{fmt}"
+    else:
+        raise HTTPException(400, f"unknown body {body!r}")
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+# --- the prototype ----------------------------------------------------------
+#
+# A sixth tab, and not a design: it is whatever Iteration 2 is showing, built
+# small enough to print and hold.  Everything with a real counterpart is left
+# alone -- the wall, the land, the magnet seats, every clamp -- and the clamps
+# stand beside the cover rather than inside it, where at this size nothing
+# could see them.
+
+
+@lru_cache(maxsize=4)
+def _pr_build(frozen: tuple, draft: bool) -> ProtoCover:
+    params = ProtoParams(**dict(frozen))
+    return pr_generate(params, quality=PR_DRAFT if draft else PR_FINAL,
+                       profile=DEFAULT_PROFILE)
+
+
+def _pr_cover(req: Request) -> tuple[ProtoCover, float]:
+    params = ProtoParams.from_dict(req.params)
+    _record("proto", params.to_dict())
+    started = time.time()
+    cover = _pr_build(tuple(sorted(params.to_dict().items())), req.draft)
+    return cover, time.time() - started
+
+
+@app.get("/api/proto/schema")
+def get_pr_schema() -> dict[str, Any]:
+    out = pr_schema(min_strut=DEFAULT_PROFILE.MIN_STRUT)
+    out["profile"] = {
+        "name": DEFAULT_PROFILE.name,
+        "min_strut": DEFAULT_PROFILE.MIN_STRUT,
+        "min_hole": DEFAULT_PROFILE.MIN_HOLE,
+        "clearance": DEFAULT_PROFILE.CLEARANCE,
+    }
+    out["profiles"] = list(PROFILES)
+    out["formats"] = ["3mf", "stl"]
+    out["presets"] = it2_presets_json()
+    out["bodies"] = list(pr_export.LABELS)
+    # The prototype is not a design of its own: it opens on whatever Iteration
+    # 2 last built, which is the whole point of it.  Its own two handles keep
+    # their defaults; everything else comes from there.
+    seen = _recorded("iter2")
+    if seen:
+        own = {"scale", "beside_gap"}
+        out["defaults"] = {
+            k: (v if k in own else seen.get(k, v)) for k, v in out["defaults"].items()
+        }
+        out["from"] = "the settings Iteration 2 last built"
+    return out
+
+
+@app.post("/api/proto/cover")
+def post_pr_cover(req: Request) -> Response:
+    cover, seconds = _pr_cover(req)
+    stats = _it2_stats(cover, seconds, req.draft)
+    stats["scale"] = cover.scale
+    return Response(
+        content=pr_export.preview_glb(cover),
+        media_type="model/gltf-binary",
+        headers={"X-Cover": quote(json.dumps(stats))},
+    )
+
+
+@app.post("/api/proto/download")
+def post_pr_download(req: Request, fmt: str = "3mf", body: str = "all") -> Response:
+    if fmt not in ("3mf", "stl"):
+        raise HTTPException(400, f"unknown format {fmt!r}")
+    req.draft = False
+    cover, _ = _pr_cover(req)
+    faults = pr_audit(cover)
+    if faults:
+        log.error("shipping files that failed audit: %s", "; ".join(faults))
+    stem = f"prototype-{cover.scale:.2f}-{cover.params.material}-{cover.mass_g:.0f}g"
+    if body == "all":
+        data, media, name = pr_export.bundle(cover, fmt), "application/zip", f"{stem}.zip"
+    elif body in cover.bodies:
+        data = (pr_export.body_3mf(cover, body) if fmt == "3mf"
+                else pr_export.body_stl(cover, body))
+        media, name = FORMATS[fmt], f"{stem}-{pr_export.LABELS[body]}.{fmt}"
     else:
         raise HTTPException(400, f"unknown body {body!r}")
     return Response(

@@ -72,6 +72,15 @@ for a deviation no one sees at any zoom the viewer allows; the print file keeps
 every triangle."""
 
 
+SIMPLIFY_ABOVE = 20_000
+"""Faces a body needs before the screen mesh is simplified at all.
+
+Simplification is for the halves, which carry a quarter of a million triangles
+of pattern.  A clamp carries two thousand, and at PREVIEW_TOLERANCE a 4.6 mm
+bolt hole comes back with seven sides -- so the screen showed hex sockets on
+parts that are bored round.  Nothing is saved by touching them."""
+
+
 def preview_glb(cover: TFCover, crease_deg: float = 35.0) -> bytes:
     """One node per body, named after it, simplified for the screen."""
     from .. import mesh_build as mb
@@ -79,8 +88,10 @@ def preview_glb(cover: TFCover, crease_deg: float = 35.0) -> bytes:
     scene = trimesh.Scene()
     for name in BODY_NAMES:
         if name in cover.bodies:
-            light = mb.from_manifold(mb.to_manifold(cover.bodies[name]).simplify(PREVIEW_TOLERANCE))
-            mesh = trimesh.graph.smooth_shade(light, angle=np.radians(crease_deg))
+            body = cover.bodies[name]
+            if len(body.faces) > SIMPLIFY_ABOVE:
+                body = mb.from_manifold(mb.to_manifold(body).simplify(PREVIEW_TOLERANCE))
+            mesh = trimesh.graph.smooth_shade(body, angle=np.radians(crease_deg))
             scene.add_geometry(mesh, node_name=name, geom_name=name)
     buf = scene.export(file_type="glb")
     return buf if isinstance(buf, bytes) else bytes(buf)

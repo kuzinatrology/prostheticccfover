@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import trimesh
-from manifold3d import Manifold, OpType
+from manifold3d import CrossSection, Manifold, OpType
 
 from .. import mesh_build as mb
 
@@ -47,12 +47,18 @@ def inset(surface, grid: np.ndarray, distance) -> np.ndarray:
         out = grid.copy()
         out[..., :2] = c + off / np.maximum(n, 1e-9) * np.maximum(n - d[..., None], 0.1)
         return out
-    for name in ("inner_grid", "offset_grid"):
+    # The two covers disagree about which way is positive.  `inner_grid` takes
+    # a wall thickness and moves in by it; `offset_grid` takes a signed
+    # distance across the skin and moves OUT by it ("inward if negative").
+    # Everything here means inward, so the sign is put right at the call --
+    # getting it wrong builds the land, the bosses and the webs a wall's width
+    # OUTSIDE the cover, where they show on the surface as rings.
+    for name, sign in (("inner_grid", 1.0), ("offset_grid", -1.0)):
         fn = getattr(surface, name, None)
         if fn is None:
             continue
         try:
-            return fn(grid, distance)
+            return fn(grid, sign * distance)
         except (ValueError, IndexError):
             # The Rhino cover's own offset wants a grid on its stored 360
             # columns; on any other width it declines, and the radial offset
@@ -175,6 +181,113 @@ def slab(centre: np.ndarray, normal: str, half: float, size: float = 900.0) -> M
     dims[axis] = 2.0 * half
     box = Manifold.cube(dims, center=True)
     return box.translate(list(np.asarray(centre, dtype=float)))
+
+
+# --- the seam's own surface ------------------------------------------------
+#
+# The cut is not a plane.  A plane lets the two halves slide up and down
+# against each other, and nothing else stops them: magnets hold across the cut,
+# not along it, and a tongue that runs the length of the seam slides in its own
+# groove.  A curve cannot slide against itself, so the shape of the cut is what
+# locks the halves together.
+#
+# Everything below builds that curve as a solid: a polygon in the (y, z) plane,
+# swept the whole width of the cover.  `y_of_z` is single valued and gently
+# sloped, so every point of the cut still faces forward or back, and the halves
+# still come apart by pulling them apart.
+
+_FAR = 900.0
+
+
+def _sweep(polygon: list[tuple[float, float]]) -> Manifold:
+    """A polygon in (y, z), swept across the whole width of the cover.
+
+    Wound counter-clockwise first: manifold fills a counter-clockwise outline
+    and hands back nothing at all for one wound the other way, which is a
+    silent empty solid rather than an error.
+    """
+    from shapely.geometry import Polygon
+    from shapely.geometry.polygon import orient
+
+    ring = orient(Polygon(polygon), 1.0)
+    section = CrossSection([[(float(a), float(b)) for a, b in ring.exterior.coords[:-1]]])
+    solid = section.extrude(_FAR)
+    # The extrusion runs along local z; turn it so local z is world x, local x
+    # is world y and local y is world z.
+    return solid.transform([[0.0, 0.0, 1.0, -_FAR / 2.0],
+                            [1.0, 0.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0, 0.0]])
+
+
+def _curve_points(z: np.ndarray, y: np.ndarray, pad: float = 80.0):
+    """The seam curve, carried past both rims so a cut is never left open."""
+    z = np.asarray(z, dtype=float)
+    y = np.asarray(y, dtype=float)
+    return (
+        np.concatenate([[z[0] - pad], z, [z[-1] + pad]]),
+        np.concatenate([[y[0]], y, [y[-1]]]),
+    )
+
+
+def curved_slab(z: np.ndarray, y: np.ndarray, half: float) -> Manifold:
+    """A band of half-thickness `half` either side of the seam curve."""
+    zz, yy = _curve_points(z, y)
+    poly = ([(float(a + half), float(b)) for a, b in zip(yy, zz)]
+            + [(float(a - half), float(b)) for a, b in zip(yy[::-1], zz[::-1])])
+    return _sweep(poly)
+
+
+def curved_half(z: np.ndarray, y: np.ndarray, side: int, gap: float = 0.0) -> Manifold:
+    """Everything in front of the seam curve (side +1) or behind it (-1).
+
+    `gap` moves the face off the curve by that much, which is how each half
+    gets its share of the fitting gap.
+    """
+    zz, yy = _curve_points(z, y)
+    edge = [(float(a + side * gap), float(b)) for a, b in zip(yy, zz)]
+    far = float(side) * _FAR
+    poly = edge + [(far, float(zz[-1])), (far, float(zz[0]))]
+    if side < 0:
+        poly = poly[::-1]
+    return _sweep(poly)
+
+
+def roof(centre: np.ndarray, theta: np.ndarray, z_rim: np.ndarray,
+         inner: float = 2.0, outer: float = 400.0) -> Manifold:
+    """Everything above a rim curve: what trims a top to an even edge.
+
+    The bottom face is ruled between two rings at the same heights, so it is
+    the surface z = rim(angle) at every radius the cover can reach, and the
+    solid over it is what comes off.
+    """
+    n = len(theta)
+    z_rim = np.asarray(z_rim, dtype=float)
+    top = float(z_rim.max()) + 500.0
+    cx, cy = float(centre[0]), float(centre[1])
+    c, s_ = np.cos(theta), np.sin(theta)
+
+    def ring(radius: float, z) -> np.ndarray:
+        return np.stack([cx + radius * c, cy + radius * s_, np.broadcast_to(z, (n,))], axis=-1)
+
+    verts = np.vstack([ring(inner, z_rim), ring(outer, z_rim),
+                       ring(inner, top), ring(outer, top)])
+    idx = np.arange(n)
+    nxt = (idx + 1) % n
+    A, B, C, D = idx, idx + n, idx + 2 * n, idx + 3 * n
+
+    def quad(a, b, flip=False):
+        f = np.concatenate([np.stack([a, b, b[nxt]], -1), np.stack([a, b[nxt], a[nxt]], -1)])
+        return f[:, ::-1] if flip else f
+
+    faces = np.vstack([
+        quad(A, B, flip=True),   # the rim surface, facing down
+        quad(B, D),              # outer wall
+        quad(C, D, flip=False),  # the top, facing up
+        quad(A, C, flip=True),   # inner wall
+    ])
+    mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+    trimesh.repair.fix_normals(mesh)
+    return mb.to_manifold(mesh)
 
 
 def add(parts: list[Manifold]) -> Manifold:

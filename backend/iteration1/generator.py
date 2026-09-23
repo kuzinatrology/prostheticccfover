@@ -19,10 +19,14 @@ end of that slider's track.
 
 from __future__ import annotations
 
+import math
+
 import logging
 from dataclasses import dataclass, field
 
 import numpy as np
+from shapely.geometry import Polygon
+from shapely.ops import polylabel
 import trimesh
 
 from .. import mesh_build as mb
@@ -106,14 +110,38 @@ def _densify_uv(ring: np.ndarray, factor: int) -> np.ndarray:
 
 
 def _hole_size(ring: np.ndarray, centre: np.ndarray, surface: IterSurface) -> tuple[float, float]:
-    """Width and length of a hole in millimetres, from its outline in (u, v)."""
+    """Width and length of a hole, mm: the widest circle it holds, and the
+    longer side of the smallest box around it.
+
+    The same measure the transfemoral tab uses, and for its reason.  Half the
+    distance from the centroid to the nearest point of the outline -- which is
+    what this used to take for the width -- is not the widest circle a hole
+    holds: a cell the fade has eaten is concave, its centroid can sit outside
+    it altogether, and a splinter then measures wide enough to keep.  The pole
+    of inaccessibility is the width, and the smallest rotated box gives the
+    length the aspect rule is against.
+
+    The ring is in (u, v); one unit of either is worth a different number of
+    millimetres and that changes along the cover, so it is measured at the
+    hole's own place on the surface.
+    """
     e = 1e-4
     p0 = surface.point(centre[0], centre[1])
     su = float(np.linalg.norm(surface.point(centre[0] + e, centre[1]) - p0) / e)
     sv = float(np.linalg.norm(surface.point(centre[0], min(centre[1] + e, 1.0)) - p0) / e)
-    span = (ring - centre) * np.array([su, sv])
-    reach = np.linalg.norm(span, axis=1)
-    return float(2.0 * reach.min()), float(2.0 * reach.max())
+    poly = Polygon(np.stack([ring[:, 0] * su, ring[:, 1] * sv], axis=1))
+    if not poly.is_valid:
+        poly = poly.buffer(0)
+    if poly.geom_type != "Polygon" or poly.area <= 0.0:
+        return 0.0, 0.0
+    try:
+        inside = polylabel(poly, tolerance=0.03 * math.sqrt(poly.area))
+    except Exception:
+        return 0.0, 0.0
+    width = 2.0 * poly.exterior.distance(inside)
+    box = np.asarray(poly.minimum_rotated_rectangle.exterior.coords)
+    sides = np.linalg.norm(np.diff(box, axis=0), axis=1)
+    return width, float(sides.max()) if len(sides) else width
 
 
 def generate(
@@ -122,6 +150,7 @@ def generate(
     quality: Quality = FINAL,
     profile: PrinterProfile = DEFAULT_PROFILE,
     keep_clear=None,
+    extra_holes=None,
 ) -> IterCover:
     """`keep_clear(u, v)` returns how far a point is from anything that has to
     stay solid, in millimetres, negative inside it.
@@ -226,6 +255,28 @@ def generate(
                 dropped += 1
                 continue
             rings.append(ring)
+        if extra_holes is not None:
+            # Large motifs the cell field would only blur.  They come with the
+            # ground they need: cells inside it come out, so the drawing reads
+            # against solid wall instead of against more holes.
+            added, added_notes, keepout = extra_holes(surface, cells, strut)
+            notes.extend(added_notes)
+            if added:
+                if keepout is not None and rings:
+                    centres = np.array([r.mean(axis=0) for r in rings])
+                    if callable(keepout):
+                        # The whole of a region belongs to the drawing -- which
+                        # is what the transfemoral tab does, giving the leaves
+                        # its entire back half.  Cells beside a leaf do not
+                        # frame it, they turn it into noise.
+                        hit = np.asarray(keepout(centres), dtype=bool)
+                    else:
+                        u_lo, u_hi, v_lo, v_hi = keepout
+                        du = (centres[:, 0] - (u_lo + u_hi) / 2.0 + 0.5) % 1.0 - 0.5
+                        hit = ((np.abs(du) < (u_hi - u_lo) / 2.0)
+                               & (centres[:, 1] > v_lo) & (centres[:, 1] < v_hi))
+                    rings = [r for r, bad in zip(rings, hit) if not bad]
+                rings.extend(added)
         if pattern.subdivided:
             notes.append(f"Pattern refined across {pattern.subdivided} cells for stiffness")
         if dropped:

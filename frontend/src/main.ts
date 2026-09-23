@@ -22,6 +22,7 @@ import {
   ITERATION1,
   ITERATION2,
   Panel,
+  PROTOTYPE,
   REFERENCE,
   TRANSFEMORAL,
   TRANSTIBIAL,
@@ -38,7 +39,7 @@ const DEBOUNCE_MS = 250;
  * groups the panel shows and what the masthead says.
  */
 interface Mode {
-  key: "transtibial" | "transfemoral" | "anatomic" | "iter1" | "iter2" | "reference";
+  key: "transtibial" | "transfemoral" | "anatomic" | "iter1" | "iter2" | "proto" | "reference";
   base: string;
   layout: PanelLayout;
   title: string;
@@ -86,6 +87,14 @@ const MODES: Mode[] = [
     title: strings.iter2.masthead.title,
     subtitle: strings.iter2.masthead.subtitle,
     specKeys: strings.iter2.specKeys,
+  },
+  {
+    key: "proto",
+    base: "/api/proto",
+    layout: PROTOTYPE,
+    title: strings.proto.masthead.title,
+    subtitle: strings.proto.masthead.subtitle,
+    specKeys: strings.proto.specKeys,
   },
   {
     key: "reference",

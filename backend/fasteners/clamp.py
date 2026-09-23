@@ -83,8 +83,20 @@ class ClampPlan:
     frame: np.ndarray
     seam_y: float
     lug_x: float
-    lo: float
-    hi: float
+    collar: float = 0.0
+    """How far a free clamp's collar reaches past its ring, mm."""
+
+    lo: float = 0.0
+    hi: float = 0.0
+    free: bool = False
+    """A clamp that holds nothing but the tube.
+
+    The lower one is free: it grips the pylon and the cover sits round it with
+    a fitting gap, so it steadies the lower end without being screwed to it.
+    Both its halves are their own bodies and it has no web -- which is also
+    what lets the front half go on at all, since a front half with two webs is
+    a rigid fork that has to be slid straight down the tube."""
+
     placed: bool = True
     """False when there was nowhere to put it.
 
@@ -101,7 +113,7 @@ class ClampPlan:
         return self.z - half, self.z + half
 
 
-def room_at(surface, wall: float, hardware, seam_y: float, z: np.ndarray) -> np.ndarray:
+def room_at(surface, wall: float, hardware, seam_y, z: np.ndarray) -> np.ndarray:
     """Free radius from the tube's axis out to the cover's inner wall, at the
     seam, per height and side.
 
@@ -113,6 +125,7 @@ def room_at(surface, wall: float, hardware, seam_y: float, z: np.ndarray) -> np.
     from . import seam as sm
 
     z = np.atleast_1d(np.asarray(z, dtype=float))
+    seam_y = np.broadcast_to(np.asarray(seam_y, dtype=float), z.shape)
     c = S.centre_of(surface, z)
     r = sm.seam_crossings(surface, seam_y, z)
     t = hardware.tube.centre(z)
@@ -129,12 +142,28 @@ def room_at(surface, wall: float, hardware, seam_y: float, z: np.ndarray) -> np.
     return out
 
 
-def fits(surface, wall: float, hardware, seam_y: float, bolt: Bolt,
+def fits(surface, wall: float, hardware, seam_y, bolt: Bolt,
          z: float, clearance: float) -> bool:
     """Whether a clamp's lugs stay inside the cover at this height."""
     need = bolt_reach(hardware, bolt) + clearance
     room = room_at(surface, wall, hardware, seam_y, np.array([z]))[0]
     return bool(np.min(room) >= need)
+
+
+def annulus_at(surface, wall: float, hardware, z: float, around: int = 96) -> float:
+    """Closest the cover's inner wall comes to the tube's axis at one height.
+
+    All the way round, not only at the seam: a free clamp's collar is a disc,
+    so it is the tightest angle that decides how far it may reach.
+    """
+    theta = np.linspace(0.0, 2.0 * np.pi, around, endpoint=False)
+    zz = np.full(around, float(z))
+    c = S.centre_of(surface, zz)
+    r = surface.radial(theta, zz) - wall
+    x = c[:, 0] + r * np.cos(theta)
+    y = c[:, 1] + r * np.sin(theta)
+    t = hardware.tube.centre(zz)
+    return float(np.min(np.hypot(x - t[:, 0], y - t[:, 1])))
 
 
 def bolt_reach(hardware, bolt: Bolt) -> float:
@@ -143,9 +172,9 @@ def bolt_reach(hardware, bolt: Bolt) -> float:
             + cfg.LUG_STRUT + bolt.lug_width / 2.0)
 
 
-def plan(name: str, wanted_z: float, hardware, seam_y: float, bolt: Bolt,
+def plan(name: str, wanted_z: float, hardware, curve, bolt: Bolt,
          others: list[float] = (), surface=None, wall: float = 0.0,
-         clearance: float = 0.3) -> ClampPlan:
+         clearance: float = 0.3, free: bool = False) -> ClampPlan:
     """Settle a clamp's height on the tube.
 
     The tube is 115 mm long and the clamp needs 22 of it plus an end margin at
@@ -154,11 +183,13 @@ def plan(name: str, wanted_z: float, hardware, seam_y: float, bolt: Bolt,
     together hold the cover's tilt no better than one, and holding the tilt is
     the whole reason for the second.
     """
+    z_curve, y_curve = curve
+    y_of = lambda q: np.interp(q, z_curve, y_curve)  # noqa: E731
     lo, hi = hardware.clamp_band
     notes: list[str] = []
-    if surface is not None:
+    if surface is not None and not free:
         zs = np.arange(lo, hi + 0.5, 1.0)
-        room = room_at(surface, wall, hardware, seam_y, zs).min(axis=1)
+        room = room_at(surface, wall, hardware, y_of(zs), zs).min(axis=1)
         good = zs[room >= bolt_reach(hardware, bolt) + clearance]
         if len(good) == 0:
             notes.append(
@@ -184,11 +215,23 @@ def plan(name: str, wanted_z: float, hardware, seam_y: float, bolt: Bolt,
                 )
     if abs(z - wanted_z) > 0.5:
         notes.append(f"{name.capitalize()} clamp moved to {z:.0f} mm, where it fits")
+    collar = 0.0
+    if free and surface is not None:
+        room = annulus_at(surface, wall, hardware, z)
+        collar = max(min(cfg.FREE_COLLAR,
+                         room - cfg.FREE_COLLAR_GAP
+                         - hardware.tube.radius - cfg.BORE_CLEARANCE - cfg.CLAMP_RING),
+                     0.0)
+        if collar <= 0.0:
+            notes.append(
+                f"The {name} clamp's collar has no room: the cover's wall comes within "
+                f"{room - hardware.tube.radius:.1f} mm of the tube"
+            )
     return ClampPlan(
-        name=name, z=z, bolt=bolt,
+        name=name, z=z, bolt=bolt, collar=collar,
         bore=hardware.tube.radius + cfg.BORE_CLEARANCE,
         ring=cfg.CLAMP_RING, height=cfg.CLAMP_HEIGHT,
-        frame=hardware.tube.frame(z), seam_y=seam_y, placed=placed,
+        frame=hardware.tube.frame(z), seam_y=float(y_of(z)), placed=placed, free=free,
         lug_x=hardware.tube.radius + cfg.BORE_CLEARANCE + bolt.anchor_hole / 2.0 + cfg.LUG_STRUT,
         lo=lo, hi=hi, notes=notes,
     )
@@ -198,7 +241,7 @@ def _matrix(frame: np.ndarray) -> list[list[float]]:
     return frame.tolist()
 
 
-def _ring_and_web(plan: ClampPlan) -> Manifold:
+def _ring_and_web(plan: ClampPlan, collar_only: bool = False) -> Manifold:
     """Ring, and the web running out of it, as one revolved solid.
 
     The profile is read in (radius, height) about the tube: full clamp height
@@ -209,7 +252,9 @@ def _ring_and_web(plan: ClampPlan) -> Manifold:
     """
     r0, r1 = plan.bore, plan.bore + plan.ring
     h, t, f = plan.height / 2.0, cfg.WEB_THICKNESS / 2.0, cfg.WEB_FLARE
-    far = 400.0
+    # A free clamp has no web: it reaches out only far enough to steady the
+    # cover, and stops a fitting gap short of its wall.
+    far = 400.0 if not collar_only else r1 + max(plan.collar, 0.5)
     outline = [
         (r0, -h), (r1, -h), (r1 + f, -t), (far, -t),
         (far, t), (r1 + f, t), (r1, h), (r0, h),
@@ -253,33 +298,42 @@ def _bolt_cuts(plan: ClampPlan) -> tuple[list[Manifold], list[Manifold]]:
     """What the bolts take out of the front part and out of the back one."""
     b = plan.bolt
     y0 = plan.seam_y - plan.frame[1, 3]
+    # Every cut that opens onto the split face is started behind it.  A hole
+    # that began exactly on the cut ends up a fitting gap inside the material
+    # once the half is trimmed, and a blind hole becomes a sealed void -- one
+    # the printer cannot make and the slicer cannot empty.
+    over = cfg.SPLIT_GAP + 1.0
     front, back = [], []
     for sign in (+1.0, -1.0):
         x = sign * plan.lug_x
         # Front: the insert's hole, or the nut's pocket, opening on the cut.
         if b.kind == "heat_set":
-            hole = Manifold.cylinder(b.anchor_depth, b.anchor_hole / 2.0, b.anchor_hole / 2.0, 48)
-            hole = hole.rotate([-90.0, 0.0, 0.0]).translate([x, y0 + b.anchor_depth, 0.0])
+            # `rotate([90, 0, 0])` lays a cylinder along -y, so it spans
+            # [-height, 0] before it is moved; put its far end at the depth the
+            # insert needs and it reaches back past the cut by `over`.
+            depth = b.anchor_depth + over
+            hole = Manifold.cylinder(depth, b.anchor_hole / 2.0, b.anchor_hole / 2.0, 48)
+            hole = hole.rotate([90.0, 0.0, 0.0]).translate([x, y0 + b.anchor_depth, 0.0])
             front.append(hole)
         else:
-            through = Manifold.cylinder(b.front_length + 2.0, (b.diameter + 0.6) / 2.0,
+            through = Manifold.cylinder(b.front_length + over + 2.0,
+                                        (b.diameter + 0.6) / 2.0,
                                         (b.diameter + 0.6) / 2.0, 32)
-            front.append(through.rotate([-90.0, 0.0, 0.0])
+            front.append(through.rotate([90.0, 0.0, 0.0])
                          .translate([x, y0 + b.front_length + 2.0, 0.0]))
             flats = cfg.HEX_NUT[b._size][0] + cfg.NUT_POCKET_CLEARANCE
             r = flats / math.sqrt(3.0)
-            pocket = Manifold.cylinder(cfg.HEX_NUT[b._size][1] + cfg.NUT_POCKET_CLEARANCE, r, r, 6)
-            pocket = pocket.rotate([-90.0, 0.0, 0.0])
+            thick = cfg.HEX_NUT[b._size][1] + cfg.NUT_POCKET_CLEARANCE
+            seat = y0 + b.anchor_depth + cfg.LUG_STRUT
+            pocket = Manifold.cylinder(thick, r, r, 6).rotate([90.0, 0.0, 0.0])
+            front.append(pocket.translate([x, seat, 0.0]))
             # Open to the top, so the nut drops in and cannot turn.
-            slot = Manifold.cube([flats, cfg.HEX_NUT[b._size][1] + cfg.NUT_POCKET_CLEARANCE,
-                                  plan.height], center=False)
-            depth = y0 + b.anchor_depth + cfg.LUG_STRUT
-            front.append(pocket.translate([x, depth, 0.0]))
-            front.append(slot.translate([x - flats / 2.0, depth, 0.0]))
+            slot = Manifold.cube([flats, thick, plan.height], center=False)
+            front.append(slot.translate([x - flats / 2.0, seat - thick, 0.0]))
         # Back: a clearance hole all the way, and a seat for the head.
-        clear = Manifold.cylinder(b.back_length + 4.0, (b.diameter + 0.6) / 2.0,
+        clear = Manifold.cylinder(b.back_length + 4.0 + over, (b.diameter + 0.6) / 2.0,
                                   (b.diameter + 0.6) / 2.0, 32).rotate([90.0, 0.0, 0.0])
-        back.append(clear.translate([x, y0 + 2.0, 0.0]))
+        back.append(clear.translate([x, y0 + 2.0 + over, 0.0]))
         head_d, head_h = b.head
         seat = Manifold.cylinder(head_h + 0.4 + 3.0, (head_d + 0.4) / 2.0,
                                  (head_d + 0.4) / 2.0, 40).rotate([90.0, 0.0, 0.0])
@@ -288,7 +342,7 @@ def _bolt_cuts(plan: ClampPlan) -> tuple[list[Manifold], list[Manifold]]:
     return [c.transform(m) for c in front], [c.transform(m) for c in back]
 
 
-def bodies(surface, wall: float, plan: ClampPlan, core: Manifold, seam_plane: float,
+def bodies(surface, wall: float, plan: ClampPlan, core: Manifold, curve,
            clearance: float) -> tuple[Manifold, Manifold, Manifold]:
     """Front part (to be fused to the front half), back part, and the boss.
 
@@ -299,13 +353,14 @@ def bodies(surface, wall: float, plan: ClampPlan, core: Manifold, seam_plane: fl
     magnets and the step.
     """
     gap = cfg.SPLIT_GAP / 2.0
-    stock = _ring_and_web(plan)
+    z_curve, y_curve = curve
+    stock = _ring_and_web(plan, collar_only=plan.free)
     lugs = _lugs(plan)
     bore = Manifold.cylinder(plan.height + 40.0, plan.bore, plan.bore, 96)
     bore = bore.translate([0.0, 0.0, -(plan.height + 40.0) / 2.0]).transform(_matrix(plan.frame))
 
-    front_half = S.slab([0.0, plan.seam_y + 450.0 + gap, 0.0], "y", 450.0)
-    back_half = S.slab([0.0, plan.seam_y - 450.0 - gap, 0.0], "y", 450.0)
+    front_half = S.curved_half(z_curve, y_curve, +1, gap)
+    back_half = S.curved_half(z_curve, y_curve, -1, gap)
 
     # Everything is trimmed to the inside of the cover.  The lugs reach
     # further from the tube than anything else on the clamp, and on the narrow

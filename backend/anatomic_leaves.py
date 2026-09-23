@@ -68,7 +68,7 @@ class _Layout:
         return float(np.linalg.norm(pu - p0) / e), float(np.linalg.norm(pv - p0) / e)
 
 
-def _fields(surface: SurfaceBase, column: _Column):
+def _fields(surface: SurfaceBase, column: _Column, keep_extra=None, keep_at=None):
     """`keep_at`: room to the nearest edge, in mm. `back_at`: the back sector.
 
     The rim is the only edge overhead and the bottom the only one below, so
@@ -87,6 +87,18 @@ def _fields(surface: SurfaceBase, column: _Column):
     run = np.concatenate([np.zeros((len(us), 1)), np.cumsum(step, axis=1)], axis=1)
     room = np.minimum(run, run[:, -1:] - run)
 
+    if keep_at is not None:
+        # A caller with a real distance-to-every-edge field hands it over and
+        # the run along the column is not used at all.  The run is a fallback:
+        # it only knows the rim above and the rim below, so on a cover with a
+        # notch or a seam it reports room that is not there, and on one
+        # without it reports less room than there is.
+        room = np.asarray(keep_at(uu, vv), dtype=float)
+    if keep_extra is not None:
+        # Any other edge the caller knows about -- on the fastened cover the
+        # notch, which opens exactly where the leaves want to go.
+        room = np.minimum(room, np.asarray(keep_extra(uu, vv), dtype=float))
+
     def keep_at(u, v):
         u = np.asarray(u, dtype=float) % 1.0
         v = np.clip(np.asarray(v, dtype=float), 0.0, 1.0)
@@ -103,12 +115,12 @@ def _fields(surface: SurfaceBase, column: _Column):
     return keep_at, back_at
 
 
-def place(surface: SurfaceBase, spec: LeafSpec):
+def place(surface: SurfaceBase, spec: LeafSpec, keep_extra=None, keep_at=None):
     """Leaf panels as rings in (u, v), what the fitting cost, and the ground
     the cell field has to leave to them."""
     column = _Column(surface, BACK_MIDLINE_U)
-    keep_at, back_at = _fields(surface, column)
-    rings, notes = _place(spec, _Layout(column), keep_at, back_at)
+    room_at, back_at = _fields(surface, column, keep_extra, keep_at)
+    rings, notes = _place(spec, _Layout(column), room_at, back_at)
     if not rings:
         return rings, notes, None
     us = np.concatenate([r[:, 0] for r in rings])

@@ -36,6 +36,7 @@ export const strings = {
     anatomic: "Anatomic shank",
     iter1: "Iteration 1",
     iter2: "Iteration 2",
+    proto: "Prototype",
   } as Record<string, string>,
 
   /** The transfemoral tab's own words. Everything else is shared. */
@@ -126,6 +127,28 @@ export const strings = {
   },
 
   /**
+   * The prototype tab: Iteration 2, built small enough to print and hold.
+   * Nothing here is a design decision -- the only two handles are how small
+   * and how far apart the loose parts stand.
+   */
+  proto: {
+    masthead: {
+      title: "Prototype",
+      subtitle: "Iteration 2 at part size \u00b7 wall, magnets and clamps left as they are",
+    },
+    specKeys: {
+      scale: "\u00d7",
+      wall_thickness: "W",
+      pattern_density: "D",
+      strut_width: "S",
+      magnet_count: "M",
+      clamp_count: "C",
+    } as Record<string, string>,
+    wallLabel: "Wall",
+    modelLabel: "Model",
+  },
+
+  /**
    * The second modelled tab. The same kind of object as the first -- a Rhino
    * file with a wall and a pattern on it -- with the attachment the first one
    * has not: a seam with magnets and two clamps on the pylon. So it ships four
@@ -164,6 +187,7 @@ export const strings = {
     rim: "Rim and notch",
     mount: "Attachment",
     leaves: "Leaves on the back",
+    prototype: "Prototype",
   },
 
   params: {
@@ -224,6 +248,9 @@ export const strings = {
     upper_hole_depth: "Module hole, front to back",
     bolt_diameter: "Bolt hole",
     clamp_count: "Clamps",
+    scale: "Printed at",
+    beside_gap: "Gap beside",
+    seam_curve: "Seam curve",
     leaf_count: "Leaves",
     leaf_size: "Leaf length",
     leaf_tilt: "Leaf lean",

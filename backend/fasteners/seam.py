@@ -21,6 +21,7 @@ fitting gap between the two; this needs none of that, and the seam is symmetric.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -32,8 +33,9 @@ from . import solids as S
 
 @dataclass
 class SeamPlan:
-    y: float
-    """Where the cut plane sits, in the cover's own frame."""
+    z_curve: np.ndarray
+    y_curve: np.ndarray
+    """The cut, as a curve of y against height in the cover's own frame."""
 
     depth_v: np.ndarray
     """Land depth per row of a grid over v, mm.
@@ -56,9 +58,53 @@ class SeamPlan:
     def depth_at(self, z) -> np.ndarray:
         return np.interp(np.asarray(z, dtype=float), self.z_of_v, self.depth_v)
 
+    def y_at(self, z) -> np.ndarray:
+        return np.interp(np.asarray(z, dtype=float), self.z_curve, self.y_curve)
+
+    def lean_at(self, z) -> np.ndarray:
+        """The seam's slope, dy/dz, so a pocket sunk in its face can be sunk
+        square to that face rather than square to the world."""
+        dz = np.gradient(self.z_curve)
+        dy = np.gradient(self.y_curve)
+        return np.interp(np.asarray(z, dtype=float), self.z_curve, dy / np.maximum(dz, 1e-9))
+
+    @property
+    def y(self) -> float:
+        """One number for the seam, for anything that only wants a report."""
+        return float(np.mean(self.y_curve))
+
     @property
     def max_depth(self) -> float:
         return float(self.depth_v.max())
+
+
+def seam_curve(surface, amplitude: float | None = None, rows: int = 80):
+    """The cut, as (heights, y).
+
+    An S about the cover's own centre line: most posterior at the bottom rim,
+    forward through the calf, back to the centre at the top.  The amplitude is
+    held to whatever keeps the cut from overhanging -- past that the halves no
+    longer come apart by pulling them apart.
+    """
+    from scipy.interpolate import PchipInterpolator
+
+    lo, hi = _height_range(surface)
+    z = np.linspace(lo, hi, rows)
+    # One number for the base, not the centre line itself.  The centre line
+    # wanders nearly 30 mm over this cover's height and it wanders unevenly;
+    # a seam that followed it would be a wobble with an S somewhere inside it,
+    # and its slope -- which is what decides whether the halves come apart at
+    # all -- would be the scan's, not the design's.
+    base = float(np.mean(S.centre_of(surface, z)[:, 1]))
+    t = (z - lo) / max(hi - lo, 1e-9)
+    a = cfg.SEAM_CURVE if amplitude is None else float(amplitude)
+    knots = np.array(cfg.SEAM_SHAPE, dtype=float)
+    shape = PchipInterpolator(knots[:, 0], knots[:, 1])(t)
+    y = base + a * shape
+    slope = np.max(np.abs(np.gradient(y) / np.maximum(np.gradient(z), 1e-9)))
+    if slope > cfg.MAX_SEAM_SLOPE:
+        y = base + a * shape * (cfg.MAX_SEAM_SLOPE / slope)
+    return z, y
 
 
 def seam_y(surface, rows: int = 60) -> float:
@@ -79,7 +125,7 @@ def _height_range(surface) -> tuple[float, float]:
     return float(grid[..., 2].min()), float(grid[..., 2].max())
 
 
-def seam_crossings(surface, y: float, z: np.ndarray) -> np.ndarray:
+def seam_crossings(surface, y, z: np.ndarray) -> np.ndarray:
     """Radius from the centre line to the seam, per height and side.
 
     Returns (n, 2): the distance out to the lateral crossing and to the medial
@@ -88,6 +134,7 @@ def seam_crossings(surface, y: float, z: np.ndarray) -> np.ndarray:
     comes back NaN.
     """
     z = np.atleast_1d(np.asarray(z, dtype=float))
+    y = np.broadcast_to(np.asarray(y, dtype=float), z.shape)
     c = S.centre_of(surface, z)
     out = np.full((len(z), 2), np.nan)
     for k, sign in enumerate((+1.0, -1.0)):
@@ -132,13 +179,14 @@ def room_along_seam(surface, hardware, y: float, wall: float, rows: int = 80,
 
 def plan(surface, hardware, wall: float, count: int, clearance: float,
          magnet_d: float, magnet_h: float, rows: int = 240,
-         avoid: list[tuple[float, float]] = ()) -> SeamPlan:
-    """Settle the seam: its plane, how deep the land goes, where magnets sit."""
-    y = seam_y(surface)
+         avoid: list[tuple[float, float]] = (), curve=None) -> SeamPlan:
+    """Settle the seam: its curve, how deep the land goes, where magnets sit."""
+    z_curve, y_curve = curve if curve is not None else seam_curve(surface)
     lo, hi = _height_range(surface)
     notes: list[str] = []
 
     probe_z = np.linspace(lo, hi, 120)
+    y = np.interp(probe_z, z_curve, y_curve)
     room = room_along_seam(surface, hardware, y, wall, rows=120, z=probe_z)
     free = np.nanmin(room, axis=1)
     # A height the scan never covered reads inf.  Carrying that through would
@@ -151,7 +199,11 @@ def plan(surface, hardware, wall: float, count: int, clearance: float,
     else:
         free = np.full_like(probe_z, cfg.LAND_DEPTH)
 
-    want = max(magnet_d + clearance + 2.0 * cfg.MAGNET_STRUT - wall, cfg.LAND_DEPTH)
+    # What has to fit across the land: a magnet with a strut either side, or
+    # the tongue with the same.  The wall is part of that width already, so
+    # only the rest is the land's to find, and it never exceeds the ceiling.
+    across = max(magnet_d + clearance, cfg.STEP_WIDTH) + 2.0 * cfg.MAGNET_STRUT
+    want = float(np.clip(across - wall, 0.0, cfg.LAND_DEPTH))
     depth = np.clip(free - clearance - 1.0, 0.0, want)
     # Smooth over height: the room is read off a scan and steps in it are the
     # scan's noise, not the prosthesis.
@@ -195,8 +247,14 @@ def plan(surface, hardware, wall: float, count: int, clearance: float,
                 heights.append(z)
         if len(heights) < count:
             notes.append(f"{len(heights)} magnet pairs placed of {count}")
-    return SeamPlan(y=y, depth_v=depth_v, z_of_v=z_of_v, z_lo=lo, z_hi=hi,
-                    magnets=sorted(heights), notes=notes)
+    missed = ~np.isfinite(seam_crossings(surface, y, probe_z)).all(axis=1)
+    if missed.any():
+        notes.append(
+            f"The seam leaves the cover at {int(missed.sum())} of {len(probe_z)} heights; "
+            "the curve is too deep for this silhouette"
+        )
+    return SeamPlan(z_curve=z_curve, y_curve=y_curve, depth_v=depth_v, z_of_v=z_of_v,
+                    z_lo=lo, z_hi=hi, magnets=sorted(heights), notes=notes)
 
 
 # --- the solids -------------------------------------------------------------
@@ -208,12 +266,16 @@ def land(surface, wall: float, plan: SeamPlan) -> Manifold | None:
         return None
     stock = S.band(surface, wall - cfg.OVERLAP, wall + plan.depth_v,
                    rows=len(plan.depth_v))
-    return stock ^ S.slab([0.0, plan.y, 0.0], "y", cfg.LAND_HALF_WIDTH)
+    return stock ^ S.curved_slab(plan.z_curve, plan.y_curve, cfg.LAND_HALF_WIDTH)
 
 
 def _step_band(surface, wall: float, plan: SeamPlan, grow: float) -> tuple[float, float]:
     """Radial depths the tongue occupies, grown by `grow` on each side."""
-    mid = wall + plan.depth_v / 2.0
+    # Across the whole face the halves meet on -- the wall and the land
+    # together -- not across the land alone.  The land used to be deep enough
+    # that everything sat inside it; it is now cut to just what it has to add,
+    # so its own middle is no longer the middle of anything.
+    mid = (wall + plan.depth_v) / 2.0
     half = cfg.STEP_WIDTH / 2.0 + grow
     return mid - half, mid + half
 
@@ -242,8 +304,9 @@ def tongue(surface, wall: float, plan: SeamPlan, grow: float, gap: float,
     depth = cfg.STEP_DEPTH + grow
     # From the back half's side of the cut up into the front half, so the two
     # parts of the front half are one solid.
-    centre = plan.y - depth / 2.0 + gap
-    rib = stock ^ S.slab([0.0, centre, 0.0], "y", depth / 2.0 + gap)
+    rib = stock ^ S.curved_slab(
+        plan.z_curve, plan.y_curve - depth / 2.0 + gap, depth / 2.0 + gap
+    )
     cuts = [
         S.slab([0.0, 0.0, z], "z", magnet_d / 2.0 + cfg.LUG_STRUT + grow)
         for z in plan.magnets
@@ -264,17 +327,24 @@ def magnet_pockets(surface, wall: float, plan: SeamPlan, magnet_d: float,
         return []
     r = (magnet_d + clearance) / 2.0
     depth = magnet_h + clearance
-    face = plan.y + side * clearance / 2.0
     out = []
     z = np.array(plan.magnets, dtype=float)
-    radius = seam_crossings(surface, plan.y, z)
+    y_here = plan.y_at(z)
+    face = y_here + side * clearance / 2.0
+    lean = plan.lean_at(z)
+    radius = seam_crossings(surface, y_here, z)
     c = S.centre_of(surface, z)
     for i, zi in enumerate(z):
         for k, sign in enumerate((+1.0, -1.0)):
             if not np.isfinite(radius[i, k]):
                 continue
-            rr = radius[i, k] - (wall + float(plan.depth_at(zi)) / 2.0)
-            x = c[i, 0] + sign * np.sqrt(max(rr**2 - (plan.y - c[i, 1]) ** 2, 0.0))
+            rr = radius[i, k] - (wall + float(plan.depth_at(zi))) / 2.0
+            x = c[i, 0] + sign * np.sqrt(max(rr**2 - (y_here[i] - c[i, 1]) ** 2, 0.0))
+            # Square to the cut, not to the world: where the seam leans, a
+            # pocket sunk along y would break out of the land's face on one
+            # side and stop short of it on the other.
+            tilt = math.degrees(math.atan(float(lean[i])))
             cyl = Manifold.cylinder(depth, r, r, 48).rotate([90.0 * side, 0.0, 0.0])
-            out.append(cyl.translate([float(x), float(face), float(zi)]))
+            cyl = cyl.rotate([tilt, 0.0, 0.0])
+            out.append(cyl.translate([float(x), float(face[i]), float(zi)]))
     return out

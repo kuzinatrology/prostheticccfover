@@ -1,10 +1,12 @@
 """The second modelled cover, from its parameters to four printable bodies.
 
     front               the front half, with the land, the tongue, the magnet
-                        pockets, and the front part and web of every clamp
+                        pockets, and the web and front part of every clamp
+                        that has one
     back                the back half, with the land, the groove and its pockets
-    lower_clamp_back    the strap that closes round the pylon
-    upper_clamp_back
+    lower_clamp_*       both halves of the free clamp, which grips the pylon
+                        and is screwed to neither half of the cover
+    upper_clamp_back    the strap that closes the webbed clamp round the pylon
 
 The shape, the wall and the pattern are the modelled tab's, built by
 `iteration1.generate` on this model's stored surface.  What is added is the
@@ -30,7 +32,15 @@ from ..iteration1.surface import IterSurface
 from ..printer_profile import DEFAULT_PROFILE, PrinterProfile
 from .params import MODEL, Iter2Params
 
-BODY_NAMES = ("front", "back", "lower_clamp_back", "upper_clamp_back")
+BODY_NAMES = ("front", "back",
+              "lower_clamp_front", "lower_clamp_back",
+              "upper_clamp_front", "upper_clamp_back")
+"""Every body the tab can produce, in the order they are listed and zipped.
+
+A free clamp -- the lower one -- is two loose halves and both are its own
+body; a clamp with a web has only a back part, because its front is printed
+as part of the front half of the cover.  Which of these exist depends on the
+settings, so the exporter skips what is not there."""
 
 __all__ = ["DRAFT", "FINAL", "Iter2Cover", "generate", "audit", "BODY_NAMES"]
 
@@ -54,6 +64,15 @@ class Iter2Cover:
     surface: IterSurface = field(repr=False, default=None)
     seam: object = field(repr=False, default=None)
     clamps: list = field(repr=False, default_factory=list)
+    rings: list = field(repr=False, default_factory=list)
+    """The holes as outlines in (u, v) -- the design itself, in coordinates
+    that do not know how big the cover is."""
+
+    sweep_solid: object = field(repr=False, default=None)
+    """The notch and the trimmed top, as one solid."""
+
+    loose_clamps: dict = field(repr=False, default_factory=dict)
+    """Every clamp body at full size, the webbed one's front part included."""
 
     @property
     def mesh(self) -> trimesh.Trimesh:
@@ -64,6 +83,8 @@ class Iter2Cover:
 def _fastener_params(p: Iter2Params) -> fkit.FastenerParams:
     return fkit.FastenerParams(
         magnet_count=p.magnets,
+        seam_curve=p.seam_curve,
+        flexion=p.flexion,
         magnet_diameter=p.magnet_diameter,
         magnet_height=p.magnet_height,
         bolt_diameter=p.bolt_diameter,
@@ -87,10 +108,54 @@ def generate(
 
     rows = 160 if quality is DRAFT else 240
     plans = fkit.plan(surface, p.wall_thickness, hardware, fp, profile, rows)
-    seam_plan, clamps, notes = plans
-    keep_clear = fkit.solid_field(surface, seam_plan, clamps)
+    seam_plan, clamps, notes, sweep = plans
+    keep_clear = fkit.solid_field(surface, seam_plan, clamps, sweep)
+    edges = fkit.edge_field(surface, seam_plan, clamps, sweep)
 
-    base = it_generate(p, quality=quality, profile=profile, keep_clear=keep_clear)
+    def leaf_room(u, v):
+        """How far a leaf is from anything it must not cross, in millimetres.
+
+        The cover's own rims, the seam the halves part on, the notch, and any
+        clamp with a web -- the same four kinds of edge the transfemoral tab
+        keeps its leaves off.
+        """
+        rim = surface.edge_distance(u, v) - p.rim_solid
+        return np.minimum(rim, edges(u, v))
+
+    leaves = None
+    if p.back_leaves:
+        from .. import anatomic_leaves as lv
+
+        def back_of_seam(centres: np.ndarray) -> np.ndarray:
+            """Which cells sit on the back half.
+
+            All of them come out.  The transfemoral tab settled this: the
+            leaves are the back half's pattern, and cells beside them only
+            blur the drawing.  Here the back half is a separate body, so the
+            split is exactly the seam the cover is cut on.
+            """
+            q = surface.point(centres[:, 0], centres[:, 1])
+            return q[..., 1] < seam_plan.y_at(q[..., 2])
+
+        def leaves(surface_, cells, strut):
+            if cells is None:
+                return [], [], None
+            rings_, notes_ = lv.place(
+                surface_,
+                lv.LeafSpec(
+                    count=int(round(p.leaf_count)),
+                    length=p.leaf_size,
+                    tilt=p.leaf_tilt,
+                    strut=strut,
+                    a_max=cells.a_max,
+                    profile=profile,
+                ),
+                keep_at=leaf_room,
+            )[:2]
+            return rings_, notes_, back_of_seam
+
+    base = it_generate(p, quality=quality, profile=profile, keep_clear=keep_clear,
+                       extra_holes=leaves)
 
     kit = fkit.build(
         mb.to_manifold(base.mesh), surface, base.wall, hardware, fp, profile, rows, plans
@@ -125,6 +190,9 @@ def generate(
         surface=surface,
         seam=kit.seam,
         clamps=kit.clamps,
+        rings=base.rings,
+        sweep_solid=kit.cut,
+        loose_clamps=kit.clamp_parts,
     )
 
 

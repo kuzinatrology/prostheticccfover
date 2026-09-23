@@ -25,17 +25,38 @@ overlap is below the wall's own tolerance and leaves nothing to reconcile.
 
 # --- the seam ---------------------------------------------------------------
 
-SEAM_PLANE_Y = 0.0
-"""The cut is the frontal plane through the cover's own centre line, so the
-halves are a front and a back.  Where a cosmetic cover is normally parted."""
+SEAM_CURVE = 18.0
+"""How far the seam wanders fore and aft over the cover's height, mm.
+
+The cut is not a plane.  A plane lets the halves slide up and down against each
+other and nothing stops them: magnets hold across the cut and a tongue slides
+in its own groove.  A curve cannot slide against itself, so this is what locks
+the two halves together along the seam."""
+
+SEAM_SHAPE = ((0.0, -1.0), (0.45, 0.6), (1.0, 0.0))
+"""The curve, as (share of the height, share of SEAM_CURVE).
+
+Most posterior at the bottom rim, forward through the calf, back to the centre
+line at the top -- an S.  Neutral at the top on purpose: that is where the
+cover goes on over the knee module, and a seam that leaned there would have to
+be threaded on at an angle."""
+
+MAX_SEAM_SLOPE = 0.45
+"""Steepest the seam may lean, as dy/dz.
+
+Past this the cut starts to overhang and the halves no longer come apart by
+pulling them apart.  Well beyond anything SEAM_SHAPE asks for; it is here so a
+slider cannot walk into it."""
 
 LAND_DEPTH = 9.0
-"""How far the land reaches inward past the inner face of the wall.
+"""The most the land may reach inward past the inner face of the wall.
 
-The wall is 3 mm on the anatomic cover and 5 on the Rhino one, and a magnet is
-6 across: the seam face as cut is too narrow to hold one.  The land is a rib
-along the inside of each seam that widens that face to wall + 9 mm, which is a
-magnet, a strut either side of it, and the fitting gap."""
+A ceiling, not a target.  How deep it actually goes follows from what lies in
+it -- a magnet and a strut either side, or the tongue and the same -- less
+whatever the wall already gives.  It was a fixed nine for a while, which is
+right for a 3 mm wall holding a 6 mm magnet and half again too much for a 5 mm
+wall holding a 4 mm one: on a small cover that land stands up inside as a pair
+of columns down the seam."""
 
 LAND_HALF_WIDTH = 6.5
 """Half the land's thickness across the seam plane.
@@ -128,6 +149,18 @@ Two clamps a long way apart hold the cover's tilt; two close together do not,
 and the whole point of the second one is the tilt.  The tube is 115 mm long and
 a clamp needs 21 mm of it, so 55 is most of what is left to spread them over."""
 
+FREE_COLLAR = 14.0
+"""How far a free clamp reaches past its ring, mm, when the cover leaves room.
+
+It is a steady, not a fixing: the collar fills most of the gap between the tube
+and the cover's wall so the lower end cannot swing, and stops a fitting gap
+short of the wall so nothing rubs."""
+
+FREE_COLLAR_GAP = 1.0
+"""Gap a free clamp keeps from the cover's inner wall, mm.  Larger than the
+printer's fitting gap: this one has to slide past the wall on assembly, and
+past a wall that carries a pattern."""
+
 BORE_CLEARANCE = 0.4
 """Gap between the bore and the tube, on the radius.
 
@@ -139,6 +172,48 @@ SPLIT_GAP = 1.2
 
 What the bolts have left to pull through.  If the two parts meet before the
 bore is tight, the clamp holds nothing."""
+
+# --- the notch at the back --------------------------------------------------
+
+FLEXION_ANGLE = 130.0
+"""How far the cover has to let the knee bend, degrees.
+
+The College Park Capital's own limit, from page 3 of the manual.  Nothing the
+cover does buys more than that, and anything less is the cover taking away
+movement the leg has."""
+
+THIGH_SAMPLE_MM = 40.0
+"""How far above the axis the thigh's girth is read off the scan."""
+
+THIGH_RADIUS_FALLBACK = 50.0
+"""Used only if the scan covers nothing above the axis."""
+
+THIGH_START_MM = 17.0
+"""Where the thigh begins, measured up the femur from the flexion axis.
+
+The Capital's dome sits 17 mm above the knee centre (manual, page 4), and
+below that is the module itself -- which is bolted to the shin and turns with
+the cover, not against it.  A thigh modelled from the axis instead fills the
+joint with a body no thigh ever reaches into, and the notch it asks for is
+both too big and impossible to shroud."""
+
+NOTCH_CLEARANCE = 2.0
+"""Gap kept between the cover and the swept thigh, mm."""
+
+# A panel standing in the notch was tried and dropped.  Measured, a rigid one
+# cannot exist: a thigh turning through 130 degrees sweeps a slab 92 mm wide
+# about the sagittal plane at every radius below the module's dome, and sinking
+# a point inward leaves it in the same slab.  It is what happens to a real leg
+# -- at deep flexion the calf lies against the back of the thigh and nothing
+# rigid fits between them.  The joint shows through the opening, as it does on
+# the covers this one is drawn from.
+
+NOTCH_FADE = 35.0
+"""How far from the notch the pattern is faded out, mm.
+
+Wider than the 14 mm a rim gets, and for the reason the transfemoral tab found:
+the notch is the edge people look at, and a pattern that stops abruptly there
+reads as damage."""
 
 # --- bolts, and what they thread into ---------------------------------------
 

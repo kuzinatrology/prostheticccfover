@@ -77,11 +77,34 @@ def veins(length: float, count: int) -> list[LineString]:
     return lines
 
 
+KEEP_AREA = 0.5
+"""How much of a leaf's outline has to survive as holes for it to read as one.
+
+Veins are added until the widest panel fits the wall, and there is a cliff a
+little past where that first succeeds: at five vein pairs a 42 mm leaf keeps
+eleven panels and three fifths of its area, at six it keeps three and a third,
+because every panel but the ones along the midrib has fallen under MIN_HOLE
+and been filled in.  What comes back is three slots in a solid blade -- not a
+leaf.
+
+Nothing separated the two before, so which side of the cliff a leaf landed on
+was decided by the wall: the widest hole a 3 mm wall carries is 8.6 mm and a
+5 mm wall 11.5, and the second lets the search run on past the cliff and stop
+there satisfied.  A leaf now has to keep this much of itself as well as fit the
+wall.  Where it cannot, `place` shrinks the row and tries again, which is what
+it always did when the leaf simply would not fit.
+
+Half is the middle of a clean gap: every leaf measured either keeps three
+fifths of its area or a third, and none anything between.
+"""
+
+
 def leaf_holes(spec: LeafSpec, length: float) -> list[Polygon]:
     """The panels of one leaf: outline less its veins, every panel carriable.
 
     More side veins go in until the widest panel fits the wall; panels too
-    small to be a hole are left solid, as a cell of that size would be.
+    small to be a hole are left solid, as a cell of that size would be, and a
+    leaf that has lost too much of itself that way is not returned at all.
     """
     shape = outline(length)
     for pairs in range(3, 14):
@@ -100,7 +123,8 @@ def leaf_holes(spec: LeafSpec, length: float) -> list[Polygon]:
                 continue
             widest = max(widest, span)
             kept.append(part)
-        if widest <= spec.a_max:
+        area = sum(k.area for k in kept)
+        if widest <= spec.a_max and area >= KEEP_AREA * shape.area:
             return kept
     return []
 

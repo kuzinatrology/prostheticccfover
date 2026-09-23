@@ -58,7 +58,12 @@ body {
   left: 34px;
   z-index: 3;
   display: flex;
-  gap: 18px;
+  /* Five covers no longer fit on one line on a narrow screen, and an
+     unwrapped strip drops the last tabs off the edge with nothing to show
+     they are there. Wrap instead, and stay clear of the panel. */
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  max-width: calc(100% - var(--panel-width) - 68px);
 }
 
 .tab {
@@ -773,6 +778,7 @@ body {
     top: auto;
     left: auto;
     padding: 12px 34px 0;
+    max-width: none;
   }
   #panel {
     position: relative;

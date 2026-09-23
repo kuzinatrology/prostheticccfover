@@ -75,6 +75,22 @@ class Tube:
             tilt_deg=self.tilt_deg,
         )
 
+    def scaled(self, factor: float) -> "Tube":
+        """The same tube, where a cover built at `factor` of size puts it.
+
+        Its diameter does not change -- there is only one pylon, and a clamp
+        that grips it is the size it is.  Only where it runs scales, so a
+        clamp built on a smaller cover still lands at the height it belongs
+        to."""
+        return Tube(
+            x_of_z=(self.x_of_z[0], self.x_of_z[1] * factor),
+            y_of_z=(self.y_of_z[0], self.y_of_z[1] * factor),
+            radius=self.radius,
+            z_lo=self.z_lo * factor,
+            z_hi=self.z_hi * factor,
+            tilt_deg=self.tilt_deg,
+        )
+
     def distance(self, pts: np.ndarray) -> np.ndarray:
         """How far each point is outside the tube, mm.  Negative inside."""
         pts = np.asarray(pts, dtype=float)
@@ -200,6 +216,12 @@ class Hardware:
         """Share of the section the scan reached at this height, 0 to 1."""
         return float(np.interp(z - self.shift[2], self._z_scan, self.coverage,
                                left=0.0, right=0.0))
+
+    def scaled(self, factor: float) -> "Hardware":
+        """This hardware as a cover at `factor` of size meets it."""
+        return Hardware(self.z * factor, self.radius, self.coverage,
+                        self.tube.scaled(factor), self.shift * factor,
+                        f"{self.name}@{factor:g}")
 
     def report(self) -> dict:
         _, report = _stored()
