@@ -76,6 +76,53 @@ Tests:
 COVER_EXAMPLES=200 .venv/bin/python -m pytest tests -q      # a longer hunt
 ```
 
+## Personal cabinet
+
+The configurator now supports individual accounts. Open **Sign in / create
+account** in the upper-right corner to register or sign in. The cabinet can
+save the current parameter set under a name, reopen it later, and delete old
+designs. Only the owner can delete a design; saved designs are publicly visible
+in the community catalogue. If a design uses an uploaded image, the original
+image bytes are stored with that design so it remains available after a server
+restart.
+
+For a deployed instance, set `COVER_SESSION_SECRET` to a long random value
+before starting the service. The SQLite database is created at
+`backend/configurator.sqlite3` and should be backed up with the rest of the
+application data.
+
+The **Community** button opens the public design catalogue. It includes every
+saved design with its author nickname, a search by design name, visible 1–5
+ratings, and a participant leaderboard based on average design rating. A user
+can rate a design once and change that rating later.
+
+Every nickname and design author links to `/profile/<user-id>`. Public profiles
+show optional personal information, a year-long activity heatmap, and all of
+the user's designs with their ratings. Profile fields are edited in the
+owner's profile page; guests can only view them.
+
+The profile avatar can be changed by clicking it and selecting an image. PNG,
+JPEG, WebP and other Pillow-readable image files up to 2 MB are accepted. The
+image is stored with the account and is also shown beside the nickname in the
+header after sign-in.
+
+The main screens have stable routes:
+
+- `/workshop` — the cover configurator;
+- `/profile/<user-id>` — a public user profile.
+
+A saved design belongs to the tab it was drawn on. The tabs do not share a
+parameter set -- the transtibial cover has no pylon diameter and Iteration 2 has
+no calf bulge -- so each design records its tab and is read back through that
+tab's own parameters. Opening a design from another tab reloads the page onto
+that tab; in the catalogue such designs carry the tab's name beside them.
+
+The header keeps **Workshop**, **Community**, and **Profile** in one responsive
+navigation row. Guests also see **Sign in / Register**. After sign-in, that
+button becomes the user's avatar and nickname and opens their profile; for a
+guest, a profile is opened by clicking a user in Community or by visiting its
+public URL.
+
 ## The four axes
 
 A design is not a list of pattern types. It is four independent things

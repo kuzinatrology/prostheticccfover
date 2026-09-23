@@ -12,7 +12,8 @@
 
 import type { MaterialSpec, Params, PresetSpec, Range, Schema, Silhouette, Stats } from "./api";
 import { thumbnail } from "./presets";
-import { has, strings } from "./strings.en";
+import { has } from "./strings.en";
+import { strings } from "./i18n";
 
 const LOG_STEPS = 1000;
 
@@ -356,6 +357,24 @@ export class Panel {
     private handlers: PanelHandlers,
     private layout: PanelLayout = TRANSTIBIAL,
   ) {
+    this.build();
+  }
+
+  /** Rebuild labels and controls after a locale change without changing parameters. */
+  refreshStrings(): void {
+    this.sliders.clear();
+    this.values.clear();
+    this.rows.clear();
+    this.choices.clear();
+    this.toggles.clear();
+    this.swatches.clear();
+    this.secondSwatches.clear();
+    this.blocks = [];
+    this.presetTiles.clear();
+    this.labels.clear();
+    this.readouts.clear();
+    this.bodyRows.clear();
+    this.root.replaceChildren();
     this.build();
   }
 

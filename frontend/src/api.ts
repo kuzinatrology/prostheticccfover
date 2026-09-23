@@ -57,6 +57,90 @@ export interface Stats {
 
 export type Params = Record<string, number | boolean | string>;
 
+export interface User { id: number; email: string; nickname: string; }
+export interface Rating { average: number; count: number; mine: number | null; }
+/** `mode` is the tab the design was drawn on; see `MODES` in main.ts. */
+export interface SavedDesign { id: number; user_id?: number; name: string; mode?: string; params: Params; created_at: number; nickname?: string; rating?: Rating; }
+export interface Participant { id: number; nickname: string; average: number; ratings: number; designs: number; }
+export interface RankedDesigner { id: number; nickname: string; avatar_url: string; average: number; ratings: number; designs: number; rank?: number; }
+export interface RankedDesign { id: number; user_id: number; name: string; mode?: string; nickname: string; avatar_url: string; average: number; ratings: number; }
+export interface MyRank { rank: number | null; designer: RankedDesigner; }
+export interface ProfileUser {
+  id: number;
+  nickname: string;
+  avatar_url: string;
+  first_name: string;
+  last_name: string;
+  city: string;
+  bio: string;
+  website: string;
+  social_link: string;
+}
+export interface ProfileDesign { id: number; name: string; mode?: string; created_at: number; nickname: string; rating: Rating; }
+export interface ActivityDay { date: string; count: number; }
+export interface PublicProfile {
+  user: ProfileUser;
+  designs: ProfileDesign[];
+  activity: ActivityDay[];
+  stats: { designs: number; average: number; ratings: number };
+  is_owner: boolean;
+}
+
+async function accountRequest<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, { ...options, headers: { "content-type": "application/json", ...(options?.headers ?? {}) } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? String(res.status));
+  }
+  return res.json();
+}
+
+export async function currentUser(): Promise<User | null> {
+  const result = await accountRequest<{ user: User | null }>("/api/auth/me");
+  return result.user;
+}
+
+export async function login(email: string, password: string): Promise<User> {
+  const result = await accountRequest<{ user: User }>("/api/auth/login", {
+    method: "POST", body: JSON.stringify({ email, password }),
+  });
+  return result.user;
+}
+
+export async function register(email: string, password: string, nickname: string): Promise<User> {
+  const result = await accountRequest<{ user: User }>("/api/auth/register", {
+    method: "POST", body: JSON.stringify({ email, password, nickname }),
+  });
+  return result.user;
+}
+
+export async function signOut(): Promise<void> { await accountRequest("/api/auth/logout", { method: "POST" }); }
+export async function listDesigns(): Promise<SavedDesign[]> { return accountRequest<SavedDesign[]>("/api/designs"); }
+export async function saveDesign(name: string, params: Params, mode: string): Promise<SavedDesign> {
+  return accountRequest<SavedDesign>("/api/designs", { method: "POST", body: JSON.stringify({ name, mode, params }) });
+}
+export async function loadDesign(id: number): Promise<SavedDesign> { return accountRequest<SavedDesign>(`/api/designs/${id}`); }
+export async function removeDesign(id: number): Promise<void> { await accountRequest(`/api/designs/${id}`, { method: "DELETE" }); }
+export async function communityDesigns(search = ""): Promise<SavedDesign[]> { return accountRequest<SavedDesign[]>(`/api/community/designs?search=${encodeURIComponent(search)}`); }
+export async function communityDesign(id: number): Promise<SavedDesign> { return accountRequest<SavedDesign>(`/api/community/designs/${id}`); }
+export async function rateDesign(id: number, score: number): Promise<Rating> { return accountRequest<Rating>(`/api/community/designs/${id}/rating`, { method: "POST", body: JSON.stringify({ score }) }); }
+export async function participants(): Promise<Participant[]> { return accountRequest<Participant[]>("/api/community/participants"); }
+export async function topDesigners(limit = 5): Promise<RankedDesigner[]> { return accountRequest<RankedDesigner[]>(`/api/community/top-designers?limit=${limit}`); }
+export async function topDesigns(limit = 5): Promise<RankedDesign[]> { return accountRequest<RankedDesign[]>(`/api/community/top-designs?limit=${limit}`); }
+export async function myRank(): Promise<MyRank> { return accountRequest<MyRank>("/api/community/my-rank"); }
+export async function fetchProfile(id: number): Promise<PublicProfile> { return accountRequest<PublicProfile>(`/api/profiles/${id}`); }
+export async function updateProfile(values: Omit<ProfileUser, "id" | "nickname">): Promise<PublicProfile> {
+  return accountRequest<PublicProfile>("/api/profile", { method: "PUT", body: JSON.stringify(values) });
+}
+export async function uploadAvatar(file: File): Promise<PublicProfile> {
+  const res = await fetch("/api/profile/avatar", { method: "POST", headers: { "content-type": file.type }, body: file });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? String(res.status));
+  }
+  return res.json();
+}
+
 /** The silhouette a picture was read as, in the unit square, y pointing up. */
 export interface Silhouette {
   id: string;
